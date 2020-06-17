@@ -16,9 +16,10 @@
 #define ONs1 "ONs1"
 #define ONs2 "ONs2"
 #define OFF "OFF"
-#define ON_WITH_TIMER "ON_WITH_TIMER"
+#define ON_WITH_TIMER "ONSolar"
 #define STATUS "STATUS"
-#define GROUNDDEAD "GROUNDDEAD"
+#define ALL "ALL"
+#define TANK "TANK"
  
 
 const char *ssid = "BCWifi";
@@ -29,33 +30,29 @@ const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
-const char *TOPIC_PingGround = "PingGround";
 const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
-const char *TOPIC_TankAwake = "TankAwake";
-const char *TOPIC_GroundResponse = "GroundResponse";
 const char *TOPIC_TankResponse = "TankResponse";
+const char *TOPIC_GroundReset = "GroundReset";
 
-const float timer_pure_seconds = 0;
+const float timer_solar_seconds = 0;
 
 
 /*
- * May need to implement acknowedgement for each TOPIC especially MotorChange
+ * Save sensor malfunction in EEPROM
  * Add more delays or yields
  * Change sleep time for when motor is ON on a timer
- * Add feedback if WiFi disconnects and reconnects
  */
 
 
 bool motor_state;   //Current state of the motor
+bool on_timer;      //True indicates that the motor is on a pure timer
 bool s1 = 1, s2 = 1, s3 = 1, s1prev = 1, s2prev = 1, s3prev = 1;  //Sensor values
-unsigned long lastGroundResponse = 4294967294; //Store last response received from ground
-Ticker ping_ground;
-Ticker ground_response;
-Ticker notify_active_state;
 WiFiClient wclient;
 PubSubClient client(wclient);
 
+Ticker timer_to_reset;
+Ticker BlinkLED;
 
 void setupWiFi() {
 
@@ -66,8 +63,10 @@ void setupWiFi() {
     delay(1000);
 }
 
-void notifyActive() {
-  client.publish(TOPIC_TankAwake, ON);
+void blinkfun() {
+  digitalWrite(LED_BUILTIN, HIGH);
+  delay(200);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
 void setup() {
@@ -76,6 +75,7 @@ void setup() {
   Serial.begin(115200);
 
   motor_state = 0;
+  on_timer = 0;
   
   pinMode(Sensor1, INPUT);
   pinMode(Sensor2, INPUT);
@@ -86,25 +86,8 @@ void setup() {
   client.setServer(host_name, 1883);
   client.setCallback(callback);
 
-  ping_ground.attach(10 * 60, pingNow);
-  notify_active_state.attach(30 * 60, notifyActive);
+  BlinkLED.attach(10, blinkfun);
 }
-
-void checkGroundResponse() {
-
-  unsigned long time_elapsed = abs(lastGroundResponse - millis());
-  if (time_elapsed > Seconds(30) && time_elapsed < Minutes(60) * 24 * 40 /* Making sure we don't run into trouble when millis overflows */) {
-    client.publish(TOPIC_PingGround, GROUNDDEAD);
-    ESP.deepSleep(0);
-  }
-}
-
-
-void pingNow() {
-  client.publish(TOPIC_PingGround, STATUS);
-  ground_response.once(20, checkGroundResponse);
-}
-
 
 void connectMQTT() {
 
@@ -113,7 +96,7 @@ void connectMQTT() {
     clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
     if(client.connect(clientID.c_str())){   //Subscribe to required topics
-      client.subscribe(TOPIC_GroundResponse);
+      client.subscribe(TOPIC_GroundReset);
       client.subscribe(TOPIC_SysKill);
       client.subscribe(TOPIC_PingTank);
     }
@@ -129,23 +112,32 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
   memcpy(message, (char *) msgPayload, msgLength);
   message[msgLength] = '\0';
 
-  if(!strcmp(msgTopic, TOPIC_GroundResponse))
-    if(!strcmp(message, ON))
-      lastGroundResponse = millis();
-
   if(!strcmp(msgTopic, TOPIC_PingTank))
     if(!strcmp(message, STATUS))
       client.publish(TOPIC_TankResponse, ON);
 
   if(!strcmp(msgTopic, TOPIC_SysKill))
-    if(!strcmp(message, OFF))
-      ESP.deepSleep(0);   //Disable system if asked to   
+    if(!strcmp(message, TANK) || !strcmp(message, ALL))
+      ESP.deepSleep(0);   //Disable system if asked to
+
+  if(!strcmp(msgTopic, TOPIC_GroundReset))
+    if(!strcmp(message, ON))
+      {
+        motor_state = 0;
+        client.publish(TOPIC_MotorChange, OFF);  
+      }    
+}
+
+void resetVar() {
+  on_timer = 0;
+  client.publish(TOPIC_MotorChange, OFF);
+  
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
 
-  if(WiFi.status() != WL_CONNECTED) 
+  if(WiFi.status() != WL_CONNECTED)
     setupWiFi();
 
   if(!client.connected())   //Make sure MQTT is connected
@@ -162,7 +154,7 @@ void loop() {
   if((!s3 && !s2) || (!s3 && !s1)) {
     //Send command to turn on motor
 
-    if(!motor_state) 
+    if(!motor_state) {
 
       if(s1 && s2)
         client.publish(TOPIC_MotorChange, ONs1s2);
@@ -181,6 +173,7 @@ void loop() {
     client.publish(TOPIC_SensorMalfunction, ON);
     motor_state = 0;
     client.publish(TOPIC_MotorChange, OFF);   //Safety
+    ESP.deepSleep(0);
     
   }
   
@@ -190,10 +183,13 @@ void loop() {
     if(!motor_state) {
       client.publish(TOPIC_MotorChange, ON_WITH_TIMER);
       motor_state = 1;
-      delay(Seconds(timer_pure_seconds));    //Sleep for the time motor is ON.
-      motor_state = 0;
+      timer_to_reset.once(timer_solar_seconds, resetVar);
     }
   }
+
+  else if (!s1 && s2 && !s3) {
+    //Don't care
+  } 
 
   else if (motor_state) {
     client.publish(TOPIC_MotorChange, OFF);
@@ -207,6 +203,6 @@ void loop() {
   s2 ^ s2prev ? client.publish(TOPIC_MainTankOVF, s2 ? ON : OFF) : 0;
   s3 ^ s3prev ? client.publish(TOPIC_SolarTankMid, s3 ? ON : OFF) : 0;
 
-  delay(motor_state ? Seconds(10) : Minutes(20));    //Different delay based on whether the motor is on or off
+  delay(Seconds(5));
 
 }
