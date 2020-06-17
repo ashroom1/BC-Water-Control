@@ -60,7 +60,7 @@ void setupWiFi() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while(WiFi.status() != WL_CONNECTED)
-    delay(1000);
+    delay(Seconds(1));
 }
 
 void blinkfun() {
@@ -85,7 +85,7 @@ void setup() {
 
   client.setServer(host_name, 1883);
   client.setCallback(callback);
-
+  connectMQTT();
   BlinkLED.attach(10, blinkfun);
 }
 
@@ -151,7 +151,7 @@ void loop() {
   s2 = digitalRead(Sensor2);
   s3 = digitalRead(Sensor3);
 
-  if((!s3 && !s2) || (!s3 && !s1)) {
+  if((!s2 && !s3) || (!s2 && !s1)) {
     //Send command to turn on motor
 
     if(!motor_state) {
@@ -187,11 +187,11 @@ void loop() {
     }
   }
 
-  else if (!s1 && s2 && !s3) {
+  else if (s1 && !s2 && s3) {
     //Don't care
   } 
 
-  else if (motor_state) {
+  else {
     client.publish(TOPIC_MotorChange, OFF);
     motor_state = 0;  
   }
@@ -203,6 +203,6 @@ void loop() {
   s2 ^ s2prev ? client.publish(TOPIC_MainTankOVF, s2 ? ON : OFF) : 0;
   s3 ^ s3prev ? client.publish(TOPIC_SolarTankMid, s3 ? ON : OFF) : 0;
 
-  delay(Seconds(5));
+  delay(Seconds(2));
 
 }
