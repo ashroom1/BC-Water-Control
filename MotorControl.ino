@@ -11,9 +11,9 @@
 #define ManualControl D2
 
 #define ON "ON"
-#define ONs1s2 "ONs1s2"
+#define ONs1s3 "ONs1s3"
 #define ONs1 "ONs1"
-#define ONs2 "ONs2"
+#define ONs3 "ONs3"
 #define OFF "OFF"
 #define STATUS "STATUS"
 #define ON_WITH_TIMER "ONSolar"
@@ -49,9 +49,9 @@ WiFiClient wclient;
 PubSubClient client(wclient);
 
 const float timer_pure_seconds = 0;
-const float timer_s1s2 = 0;
+const float timer_s1s3 = 0;
 const float timer_s1 = 0;
-const float timer_s2 = 0;
+const float timer_s3 = 0;
 
 /*
  * Add delay everywhere we turn off motor to avoid immediate turn on
@@ -144,12 +144,12 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
       }
     }
 
-    if(!strcmp(message, ONs1s2)) {
+    if(!strcmp(message, ONs1s3)) {
       if(!motor_state) {
         motor_state = 1;
         digitalWrite(Motor, HIGH);
         client.publish(TOPIC_CurrentMotorState, ON);
-        water_timer.once(timer_s1s2, waterTimer);
+        water_timer.once(timer_s1s3, waterTimer);
       }
     }
 
@@ -162,12 +162,12 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
       }
     }
 
-    if(!strcmp(message, ONs2)) {
+    if(!strcmp(message, ONs3)) {
       if(!motor_state) {
         motor_state = 1;
         digitalWrite(Motor, HIGH);
         client.publish(TOPIC_CurrentMotorState, ON);
-        water_timer.once(timer_s2, waterTimer);
+        water_timer.once(timer_s3, waterTimer);
       }
     }
   }
