@@ -12,9 +12,9 @@
 #define Sensor3 D3
 
 #define ON "ON"
-#define ONs1s2 "ONs1s2"
+#define ONs1s3 "ONs1s3"
 #define ONs1 "ONs1"
-#define ONs2 "ONs2"
+#define ONs3 "ONs3"
 #define OFF "OFF"
 #define ON_WITH_TIMER "ONSolar"
 #define STATUS "STATUS"
@@ -156,12 +156,12 @@ void loop() {
 
     if(!motor_state) {
 
-      if(s1 && s2)
-        client.publish(TOPIC_MotorChange, ONs1s2);
-      else if(s1)
+      if(!s1 && !s3)
+        client.publish(TOPIC_MotorChange, ONs1s3);
+      else if(!s1)
         client.publish(TOPIC_MotorChange, ONs1);
-      else if(s2)
-        client.publish(TOPIC_MotorChange, ONs2);
+      else if(!s3)
+        client.publish(TOPIC_MotorChange, ONs3);
 
       motor_state = 1;
     }
