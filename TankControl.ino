@@ -1,6 +1,7 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <Ticker.h>
+#include <EEPROM.h>
 
 #define Seconds(s) s*1000
 #define Minutes(m) m*Seconds(60)
@@ -34,19 +35,25 @@ const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_GroundReset = "GroundReset";
+const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
 const float timer_solar_seconds = 0;
 
 
 /*
- * Save sensor malfunction in EEPROM
+ * --Save sensor malfunction in EEPROM--
  * Add more delays or yields
+ * Trigger solar tank timer when solar tank 0 to 1.
  * Change sleep time for when motor is ON on a timer
+ * --Send on message repeatedly--
+ * To check - persistence
+ * When tank reset detach all tickers
  */
 
 
 bool motor_state;   //Current state of the motor
 bool on_timer;      //True indicates that the motor is on a pure timer
+bool sensor_malfunction;
 bool s1 = 1, s2 = 1, s3 = 1, s1prev = 1, s2prev = 1, s3prev = 1;  //Sensor values
 WiFiClient wclient;
 PubSubClient client(wclient);
@@ -72,10 +79,11 @@ void blinkfun() {
 void setup() {
   // put your setup code here, to run once:
 
-  Serial.begin(115200);
+  Serial.begin(115200);  
 
   motor_state = 0;
   on_timer = 0;
+  sensor_malfunction = 0;
   
   pinMode(Sensor1, INPUT);
   pinMode(Sensor2, INPUT);
@@ -86,6 +94,12 @@ void setup() {
   client.setServer(host_name, 1883);
   client.setCallback(callback);
   connectMQTT();
+
+  if(EEPROM.read(0)) {
+    client.publish(TOPIC_SensorMalfunction, ON);
+    sensor_malfunction = 1;
+  }
+  
   BlinkLED.attach(10, blinkfun);
 }
 
@@ -99,6 +113,7 @@ void connectMQTT() {
       client.subscribe(TOPIC_GroundReset);
       client.subscribe(TOPIC_SysKill);
       client.subscribe(TOPIC_PingTank);
+      client.subscribe(TOPIC_SensorMalfunctionReset);
     }
     else
       delay(Seconds(2.5));  //Try again after a while
@@ -112,9 +127,18 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
   memcpy(message, (char *) msgPayload, msgLength);
   message[msgLength] = '\0';
 
-  if(!strcmp(msgTopic, TOPIC_PingTank))
-    if(!strcmp(message, STATUS))
-      client.publish(TOPIC_TankResponse, ON);
+  if(!sensor_malfunction) {
+    if(!strcmp(msgTopic, TOPIC_PingTank))
+      if(!strcmp(message, STATUS))
+        client.publish(TOPIC_TankResponse, ON);
+
+    if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
+      if(!strcmp(message, ON)) {
+        sensor_malfunction = 0;
+        EEPROM.write(0, 0);
+      }
+        
+  }
 
   if(!strcmp(msgTopic, TOPIC_SysKill))
     if(!strcmp(message, TANK) || !strcmp(message, ALL))
@@ -124,14 +148,13 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, ON))
       {
         motor_state = 0;
-        client.publish(TOPIC_MotorChange, OFF);  
-      }    
+        client.publish(TOPIC_MotorChange, OFF);
+      }
 }
 
 void resetVar() {
   on_timer = 0;
   client.publish(TOPIC_MotorChange, OFF);
-  
 }
 
 void loop() {
@@ -151,57 +174,68 @@ void loop() {
   s2 = digitalRead(Sensor2);
   s3 = digitalRead(Sensor3);
 
-  if((!s2 && !s3) || (!s2 && !s1)) {
-    //Send command to turn on motor
+  if(!sensor_malfunction) {     //If sensor malfunction, do nothing
 
-    if(!motor_state) {
-
-      if(!s1 && !s3)
-        client.publish(TOPIC_MotorChange, ONs1s3);
-      else if(!s1)
-        client.publish(TOPIC_MotorChange, ONs1);
-      else if(!s3)
-        client.publish(TOPIC_MotorChange, ONs3);
-
-      motor_state = 1;
-    }
-  }
+    if((!s2 && !s3) || (!s2 && !s1)) {
+      //Send command to turn on motor
   
-  else if(s2 && !s1) {
-    //Sensor malfunction
-
-    client.publish(TOPIC_SensorMalfunction, ON);
-    motor_state = 0;
-    client.publish(TOPIC_MotorChange, OFF);   //Safety
-    ESP.deepSleep(0);
+      //if(!motor_state) {    //Comment if ON message is to be sent multiple times
+  
+        if(!s1 && !s3)
+          client.publish(TOPIC_MotorChange, ONs1s3);
+        else if(!s1)
+          client.publish(TOPIC_MotorChange, ONs1);
+        else if(!s3)
+          client.publish(TOPIC_MotorChange, ONs3);
+  
+        motor_state = 1;
+      //}
+    }
     
-  }
+    else if(s2 && !s1) {
+      //Sensor malfunction
   
-  else if (s2 && !s3 && s1) {
-
-    //Use timer to turn on
-    if(!motor_state) {
-      client.publish(TOPIC_MotorChange, ON_WITH_TIMER);
-      motor_state = 1;
-      timer_to_reset.once(timer_solar_seconds, resetVar);
+      client.publish(TOPIC_SensorMalfunction, ON);
+      motor_state = 0;
+      client.publish(TOPIC_MotorChange, OFF);   //Safety
+  
+      EEPROM.write(0, 1);
+      
+      sensor_malfunction = 1;
+      //ESP.deepSleep(0);
+      
     }
-  }
+    
+    else if (s2 && !s3 && s1) {
+  
+      //Use timer to turn on
+      //if(!motor_state) {
+      client.publish(TOPIC_MotorChange, ON_WITH_TIMER);
+      if(!motor_state) {
+        motor_state = 1;
+        timer_to_reset.once(timer_solar_seconds, resetVar);
+      }
+      //}
+    }
+  
+    else if (s1 && !s2 && s3) {
+      //Don't care
+      //Send on if on or off if off
+    } 
+  
+    else {
+      client.publish(TOPIC_MotorChange, OFF);
+      motor_state = 0;  
+    }
+  
+    //Report changes to sensor values
+    s1 ^ s1prev ? client.publish(TOPIC_MainTankMid, s1 ? ON : OFF) : 0;
+    s2 ^ s2prev ? client.publish(TOPIC_MainTankOVF, s2 ? ON : OFF) : 0;
+    s3 ^ s3prev ? client.publish(TOPIC_SolarTankMid, s3 ? ON : OFF) : 0;
 
-  else if (s1 && !s2 && s3) {
-    //Don't care
-  } 
-
-  else {
-    client.publish(TOPIC_MotorChange, OFF);
-    motor_state = 0;  
   }
   
   client.loop();
-
-  //Report changes to sensor values
-  s1 ^ s1prev ? client.publish(TOPIC_MainTankMid, s1 ? ON : OFF) : 0;
-  s2 ^ s2prev ? client.publish(TOPIC_MainTankOVF, s2 ? ON : OFF) : 0;
-  s3 ^ s3prev ? client.publish(TOPIC_SolarTankMid, s3 ? ON : OFF) : 0;
 
   delay(Seconds(2));
 
