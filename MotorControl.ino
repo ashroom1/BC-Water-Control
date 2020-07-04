@@ -76,8 +76,10 @@ void tankresponsefun() {
 
   unsigned long elapsed = lastTankResponse - pingTime;
   if(abs(elapsed) < Minutes(48 * 60 /* 2 days */)) {       //Handle millis overflow
-    if(elapsed <= Seconds(14)) 
+    if(elapsed <= Seconds(14)) {
       no_response_count = 0;
+      tank_responsive = 1;
+    }
     else {
       if(no_response_count < 3)
         ++no_response_count;
@@ -125,12 +127,13 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
       ESP.deepSleep(0);
     }
 
-  if(!strcmp(msgTopic, TOPIC_MotorChange) && !tank_responsive) {
+  if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive) {
 
     if(!strcmp(message, OFF)) {
       if(motor_state) {
         digitalWrite(Motor, LOW);
         motor_state = 0;
+        water_timer.detach();
         client.publish(TOPIC_CurrentMotorState, OFF);
       }  
     }
@@ -235,6 +238,7 @@ void connectMQTT() {
 void loop() {
   // put your main code here, to run repeatedly:
   manualEnable = digitalRead(ManualOverride);
+  
   if(manualEnable) {
     client.publish(TOPIC_ManualOverride, ON);
     manual_state = digitalRead(ManualControl);
@@ -256,6 +260,12 @@ void loop() {
 
     if(!client.connected())   //Make sure MQTT is connected
       connectMQTT();
+
+    if(no_response_count > 2) {
+      tank_responsive = 0;
+      motor_state = 0;
+      digitalWrite(Motor, LOW);
+    }  
 
     client.publish(TOPIC_ManualOverride, OFF);
     client.loop();
