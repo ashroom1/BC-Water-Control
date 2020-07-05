@@ -8,9 +8,10 @@
 #define MAX_MSG_LENGTH 120
 
 //  Pin numbers of the sensor
-#define Sensor1 D1
-#define Sensor2 D2
-#define Sensor3 D3
+#define Sensor1 1
+#define Sensor2 3
+#define Sensor3 4
+#define EEPROM_init_pin 5
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -23,9 +24,9 @@
 #define TANK "TANK"
  
 
-const char *ssid = "BCWifi";
-const char *password = "Swamy";
-const char *host_name = "hostname_goes_here";
+const char *ssid = "likith12345";
+const char *password = "*druthi#";
+const char *host_name = "192.168.0.106";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
@@ -37,7 +38,7 @@ const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_GroundReset = "GroundReset";
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
-const float timer_solar_seconds = 0;
+const float timer_solar_seconds = 1;
 
 
 /*
@@ -48,9 +49,10 @@ const float timer_solar_seconds = 0;
  * --Send on message repeatedly--
  * To check - persistence
  * When tank reset detach all tickers
+ * Don't care-> Send on if on or off if off
  */
 
-
+bool blink_flag;   //Blink Flag interrupt
 bool motor_state;   //Current state of the motor
 bool on_timer;      //True indicates that the motor is on a pure timer
 bool sensor_malfunction;
@@ -71,16 +73,16 @@ void setupWiFi() {
 }
 
 void blinkfun() {
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(200);
-  digitalWrite(LED_BUILTIN, LOW);
+  blink_flag =1;
 }
 
 void setup() {
-  // put your setup code here, to run once:
+  
+  /*Likith Code Edit: comments to be removed Start*/
+//  Serial.begin(115200);  
+  /*Likith Code Edit: comments to be removed End*/
 
-  Serial.begin(115200);  
-
+  blink_flag = 0;
   motor_state = 0;
   on_timer = 0;
   sensor_malfunction = 0;
@@ -88,19 +90,37 @@ void setup() {
   pinMode(Sensor1, INPUT);
   pinMode(Sensor2, INPUT);
   pinMode(Sensor3, INPUT);
+  pinMode(EEPROM_init_pin, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   setupWiFi();
 
+  /*Likith Code Edit Start*/
+  for(int i=0; i<=10; i++){
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(500);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(500);
+  }
+  /*Likith Code Edit End*/
+  
+  
+ 
+  
   client.setServer(host_name, 1883);
   client.setCallback(callback);
   connectMQTT();
 
+  if(digitalRead(EEPROM_init_pin)) 
+    EEPROM.write(0, 0);
+
+  
   if(EEPROM.read(0)) {
     client.publish(TOPIC_SensorMalfunction, ON);
     sensor_malfunction = 1;
   }
   
-  BlinkLED.attach(10, blinkfun);
+  BlinkLED.attach(5, blinkfun);
 }
 
 void connectMQTT() {
@@ -131,13 +151,11 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(msgTopic, TOPIC_PingTank))
       if(!strcmp(message, STATUS))
         client.publish(TOPIC_TankResponse, ON);
-
     if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
       if(!strcmp(message, ON)) {
         sensor_malfunction = 0;
         EEPROM.write(0, 0);
-      }
-        
+      }     
   }
 
   if(!strcmp(msgTopic, TOPIC_SysKill))
@@ -154,12 +172,22 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
 void resetVar() {
   on_timer = 0;
-  client.publish(TOPIC_MotorChange, OFF);
+  /*Likith Code Edit: Comment to be removed Start*/
+//  client.publish(TOPIC_MotorChange, OFF);
+  /*Likith Code Edit: Comment to be removed End*/
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-
+  
+  /*Likith Code Edit to be removed Start*/
+  if(blink_flag){
+  digitalWrite(LED_BUILTIN, LOW);
+  delay(500);
+  digitalWrite(LED_BUILTIN, HIGH);
+  blink_flag = 0;
+  }
+  /*Likith Code Edit to be removed End*/
   if(WiFi.status() != WL_CONNECTED)
     setupWiFi();
 
@@ -236,7 +264,5 @@ void loop() {
   }
   
   client.loop();
-
-  delay(Seconds(2));
-
+  delay(Seconds(0.05));
 }
