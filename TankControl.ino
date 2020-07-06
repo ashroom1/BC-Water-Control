@@ -43,20 +43,24 @@ const float timer_solar_seconds = 1;
 
 /*
  * --Save sensor malfunction in EEPROM--
- * Add more delays or yields
+ * ??Add more delays or yields??
  * Trigger solar tank timer when solar tank 0 to 1.
- * Change sleep time for when motor is ON on a timer
+ * ??Change sleep time for when motor is ON on a timer??
  * --Send on message repeatedly--
  * To check - persistence
- * When tank reset detach all tickers
- * Don't care-> Send on if on or off if off
+ * ??When tank reset detach all tickers??
+ * --Don't care-> Send on if on or off if off--
+ * Delay to be given for off message frequency.
+ * Unique LED pattern for WiFi, MQTT etc.
+ * Motor control program TBD - Reset motor timer for every ON message.
  */
 
 bool blink_flag;   //Blink Flag interrupt
 bool motor_state;   //Current state of the motor
-bool on_timer;      //True indicates that the motor is on a pure timer
+bool solartimer_flag;      //True indicates that the motor is on a pure timer
 bool sensor_malfunction;
 bool s1 = 1, s2 = 1, s3 = 1, s1prev = 1, s2prev = 1, s3prev = 1;  //Sensor values
+
 WiFiClient wclient;
 PubSubClient client(wclient);
 
@@ -73,7 +77,7 @@ void setupWiFi() {
 }
 
 void blinkfun() {
-  blink_flag =1;
+  blink_flag = 1;
 }
 
 void setup() {
@@ -84,7 +88,7 @@ void setup() {
 
   blink_flag = 0;
   motor_state = 0;
-  on_timer = 0;
+  solartimer_flag = 0;
   sensor_malfunction = 0;
   
   pinMode(Sensor1, INPUT);
@@ -95,18 +99,6 @@ void setup() {
 
   setupWiFi();
 
-  /*Likith Code Edit Start*/
-  for(int i=0; i<=10; i++){
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(500);
-  }
-  /*Likith Code Edit End*/
-  
-  
- 
-  
   client.setServer(host_name, 1883);
   client.setCallback(callback);
   connectMQTT();
@@ -119,8 +111,19 @@ void setup() {
     client.publish(TOPIC_SensorMalfunction, ON);
     sensor_malfunction = 1;
   }
+  else {
+    client.publish(TOPIC_SensorMalfunction, OFF);
+  }
   
   BlinkLED.attach(5, blinkfun);
+ 
+  for(int i=0; i<=10; i++){
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(500);
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(500);
+  }
+ 
 }
 
 void connectMQTT() {
@@ -150,13 +153,14 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
   if(!sensor_malfunction) {
     if(!strcmp(msgTopic, TOPIC_PingTank))
       if(!strcmp(message, STATUS))
-        client.publish(TOPIC_TankResponse, ON);
-    if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
-      if(!strcmp(message, ON)) {
-        sensor_malfunction = 0;
-        EEPROM.write(0, 0);
-      }     
+        client.publish(TOPIC_TankResponse, ON);   
   }
+ 
+  if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
+    if(!strcmp(message, ON)) {
+      sensor_malfunction = 0;
+      EEPROM.write(0, 0);
+    }  
 
   if(!strcmp(msgTopic, TOPIC_SysKill))
     if(!strcmp(message, TANK) || !strcmp(message, ALL))
@@ -171,7 +175,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 }
 
 void resetVar() {
-  on_timer = 0;
+  solartimer_flag = 1;
   /*Likith Code Edit: Comment to be removed Start*/
 //  client.publish(TOPIC_MotorChange, OFF);
   /*Likith Code Edit: Comment to be removed End*/
@@ -180,14 +184,19 @@ void resetVar() {
 void loop() {
   // put your main code here, to run repeatedly:
   
-  /*Likith Code Edit to be removed Start*/
-  if(blink_flag){
-  digitalWrite(LED_BUILTIN, LOW);
-  delay(500);
-  digitalWrite(LED_BUILTIN, HIGH);
-  blink_flag = 0;
+  if(solartimer_flag) {
+    motor_state = 0;
+    solartimer_flag = 0;
+    client.publish(TOPIC_MotorChange, OFF);
   }
-  /*Likith Code Edit to be removed End*/
+ 
+  if(blink_flag){
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(500);
+    digitalWrite(LED_BUILTIN, HIGH);
+    blink_flag = 0;
+  }
+
   if(WiFi.status() != WL_CONNECTED)
     setupWiFi();
 
@@ -209,13 +218,13 @@ void loop() {
   
       //if(!motor_state) {    //Comment if ON message is to be sent multiple times
   
-        if(!s1 && !s3)
+        if(!s1 && !s3) 
           client.publish(TOPIC_MotorChange, ONs1s3);
         else if(!s1)
           client.publish(TOPIC_MotorChange, ONs1);
         else if(!s3)
           client.publish(TOPIC_MotorChange, ONs3);
-  
+     
         motor_state = 1;
       //}
     }
@@ -248,7 +257,8 @@ void loop() {
   
     else if (s1 && !s2 && s3) {
       //Don't care
-      //Send on if on or off if off
+      if (!motor_state)
+         client.publish(TOPIC_MotorChange, OFF);
     } 
   
     else {
