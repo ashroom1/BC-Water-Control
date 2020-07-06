@@ -5,7 +5,7 @@
 
 #define Seconds(s) s*1000
 #define Minutes(m) m*Seconds(60)
-#define MAX_MSG_LENGTH 120
+#define MAX_MSG_LENGTH 25
 
 //  Pin numbers of the sensor
 #define Sensor1 1
@@ -44,7 +44,7 @@ const float timer_solar_seconds = 1;
 /*
  * --Save sensor malfunction in EEPROM--
  * ??Add more delays or yields??
- * Trigger solar tank timer when solar tank 0 to 1.
+ * Trigger solar tank timer when solar tank 0 to 1. (Take care of solar sensor malfunction)
  * ??Change sleep time for when motor is ON on a timer??
  * --Send on message repeatedly--
  * To check - persistence
@@ -108,21 +108,21 @@ void setup() {
 
   
   if(EEPROM.read(0)) {
-    client.publish(TOPIC_SensorMalfunction, ON);
+    client.publish(TOPIC_SensorMalfunction, ON, 2, true);
     sensor_malfunction = 1;
   }
   else {
-    client.publish(TOPIC_SensorMalfunction, OFF);
+    client.publish(TOPIC_SensorMalfunction, OFF, 3, true);
   }
-  
-  BlinkLED.attach(5, blinkfun);
  
   for(int i=0; i<=10; i++){
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
     digitalWrite(LED_BUILTIN, LOW);
     delay(500);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(500);
   }
+ 
+  BlinkLED.attach(5, blinkfun);
  
 }
 
@@ -176,22 +176,13 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
 void resetVar() {
   solartimer_flag = 1;
-  /*Likith Code Edit: Comment to be removed Start*/
-//  client.publish(TOPIC_MotorChange, OFF);
-  /*Likith Code Edit: Comment to be removed End*/
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   
-  if(solartimer_flag) {
-    motor_state = 0;
-    solartimer_flag = 0;
-    client.publish(TOPIC_MotorChange, OFF);
-  }
- 
   if(blink_flag){
-    digitalWrite(LED_BUILTIN, LOW);
+    digitalWrite(LED_BUILTIN, LOW);  //Active low
     delay(500);
     digitalWrite(LED_BUILTIN, HIGH);
     blink_flag = 0;
@@ -202,6 +193,12 @@ void loop() {
 
   if(!client.connected())   //Make sure MQTT is connected
     connectMQTT();
+ 
+  if(solartimer_flag) {
+    motor_state = 0;
+    solartimer_flag = 0;
+    client.publish(TOPIC_MotorChange, OFF);
+  }
 
   s1prev = s1;
   s2prev = s2;
@@ -213,7 +210,10 @@ void loop() {
 
   if(!sensor_malfunction) {     //If sensor malfunction, do nothing
 
-    if((!s2 && !s3) || (!s2 && !s1)) {
+//    if((!s2 && !s3) || (!s2 && !s1)) {
+   
+    if(!s2 && (!s3 || !s1)) {
+     
       //Send command to turn on motor
   
       //if(!motor_state) {    //Comment if ON message is to be sent multiple times
@@ -232,15 +232,13 @@ void loop() {
     else if(s2 && !s1) {
       //Sensor malfunction
   
+      EEPROM.write(0, 1);
+     
       client.publish(TOPIC_SensorMalfunction, ON);
       motor_state = 0;
       client.publish(TOPIC_MotorChange, OFF);   //Safety
-  
-      EEPROM.write(0, 1);
       
       sensor_malfunction = 1;
-      //ESP.deepSleep(0);
-      
     }
     
     else if (s2 && !s3 && s1) {
@@ -270,7 +268,7 @@ void loop() {
     s1 ^ s1prev ? client.publish(TOPIC_MainTankMid, s1 ? ON : OFF) : 0;
     s2 ^ s2prev ? client.publish(TOPIC_MainTankOVF, s2 ? ON : OFF) : 0;
     s3 ^ s3prev ? client.publish(TOPIC_SolarTankMid, s3 ? ON : OFF) : 0;
-
+  
   }
   
   client.loop();
