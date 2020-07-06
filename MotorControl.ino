@@ -4,11 +4,11 @@
 
 #define Seconds(s) s*1000
 #define Minutes(m) m*Seconds(60)
-#define MAX_MSG_LENGTH 120
+#define MAX_MSG_LENGTH 25
 
-#define Motor LED_BUILTIN
-#define ManualOverride D1
-#define ManualControl D2
+#define Motor 1
+#define ManualOverride 3
+#define ManualControl 4
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -32,7 +32,9 @@ const char *TOPIC_ManualOverride = "ManualOverride";
 const char *TOPIC_MotorReset = "MotorReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";
 
-
+bool blink_flag;   //Blink Flag interrupt
+bool tankresponsefun_flag;    //Tank ping response interrupt
+bool pingNow_flag;  //Tank ping interrupt
 bool motor_state;
 bool manualEnable;
 bool manual_state;
@@ -42,7 +44,7 @@ int no_response_count = 0;
 unsigned long lastTankResponse = 4294967294;
 unsigned long pingTime;
 Ticker ping_tank;
-Ticker tank_response;
+Ticker tank_response;   //Probably can be removed
 Ticker BlinkLED;
 Ticker water_timer;
 WiFiClient wclient;
@@ -56,6 +58,7 @@ const float timer_s3 = 0;
 /*
  * Add delay everywhere we turn off motor to avoid immediate turn on
  * Maybe send manualOverride message less frequently to avoid wasting time at both ends.
+ * Ticker tank_response;   //Probably can be removed
  */
 
 void setupWiFi() {
@@ -73,25 +76,11 @@ void setupWiFi() {
 }
 
 void tankresponsefun() {
-
-  unsigned long elapsed = lastTankResponse - pingTime;
-  if(abs(elapsed) < Minutes(48 * 60 /* 2 days */)) {       //Handle millis overflow
-    if(elapsed <= Seconds(14)) {
-      no_response_count = 0;
-      tank_responsive = 1;
-    }
-    else {
-      if(no_response_count < 3)
-        ++no_response_count;
-    }
-  }
+  tankresponsefun_flag = 1;
 }
 
-
 void pingNow() {
-  client.publish(TOPIC_PingTank, STATUS);
-  pingTime = millis();
-  tank_response.once(14, tankresponsefun);
+  pingNow_flag = 1;
 }
 
 
@@ -177,17 +166,19 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 }
 
 void blinkfun() {
-  digitalWrite(LED_BUILTIN, HIGH);
-  delay(200);
-  digitalWrite(LED_BUILTIN, LOW);
+  blink_flag = 1;
 }
 
 void setup() {
   // put your setup code here, to run once:
 
-  Serial.begin(115200);
+ // Serial.begin(115200);
   motor_state = 0;
   tank_responsive = 1;
+  blink_flag = 0;
+  tankresponsefun_flag = 0;
+  pingNow_flag = 0;
+  
   
   pinMode(Motor, OUTPUT);
   pinMode(ManualOverride, INPUT);
@@ -214,11 +205,9 @@ void setup() {
 void connectMQTT() {
 
   bool manual;
-  
   while (!client.connected()) {
 
     manual = digitalRead(ManualOverride);
-
     if(manual)
       break;
     String clientID = "BCground-";
@@ -237,6 +226,37 @@ void connectMQTT() {
 
 void loop() {
   // put your main code here, to run repeatedly:
+  
+  if(blink_flag) {
+    digitalWrite(LED_BUILTIN, LOW);  //Active low
+    delay(500);
+    digitalWrite(LED_BUILTIN, HIGH);
+    blink_flag = 0;
+  }
+  
+  if(tankresponsefun_flag) {
+    
+    unsigned long elapsed = lastTankResponse - pingTime;
+    if(abs(elapsed) < Minutes(48 * 60 /* 2 days */)) {       //Handle millis overflow
+      if(elapsed <= Seconds(14)) {
+        no_response_count = 0;
+        tank_responsive = 1;
+      }
+      else {
+        if(no_response_count < 3)
+          ++no_response_count;
+      }
+    }  
+    tankresponsefun_flag = 0;
+  }
+  
+  if(pingNow_flag) {
+    client.publish(TOPIC_PingTank, STATUS);
+    pingTime = millis();
+    tank_response.once(14, tankresponsefun);
+    pingNow_flag = 0; 
+  }
+  
   manualEnable = digitalRead(ManualOverride);
   
   if(manualEnable) {
