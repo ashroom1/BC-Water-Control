@@ -35,7 +35,7 @@ const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
-const char *TOPIC_GroundReset = "GroundReset";
+// const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
 const float timer_solar_seconds = 1;
@@ -53,6 +53,7 @@ const float timer_solar_seconds = 1;
  * Delay to be given for off message frequency.
  * Unique LED pattern for WiFi, MQTT etc.
  * Motor control program TBD - Reset motor timer for every ON message.
+ * //const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle, Also check the callback
  */
 
 bool blink_flag;   //Blink Flag interrupt
@@ -133,7 +134,7 @@ void connectMQTT() {
     clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
     if(client.connect(clientID.c_str())){   //Subscribe to required topics
-      client.subscribe(TOPIC_GroundReset);
+//       client.subscribe(TOPIC_GroundReset);
       client.subscribe(TOPIC_SysKill);
       client.subscribe(TOPIC_PingTank);
       client.subscribe(TOPIC_SensorMalfunctionReset);
@@ -165,13 +166,16 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
   if(!strcmp(msgTopic, TOPIC_SysKill))
     if(!strcmp(message, TANK) || !strcmp(message, ALL))
       ESP.deepSleep(0);   //Disable system if asked to
-
+ 
+/************************************************
   if(!strcmp(msgTopic, TOPIC_GroundReset))
     if(!strcmp(message, ON))
       {
         motor_state = 0;
         client.publish(TOPIC_MotorChange, OFF);
       }
+************************************************/      
+ 
 }
 
 void resetVar() {
