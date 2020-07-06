@@ -24,7 +24,7 @@ const char *ssid = "BCWifi";
 const char *password = "Swamy";
 const char *host_name = "hostname_goes_here";
 const char *TOPIC_MotorChange = "MotorStatusChange";
-const char *TOPIC_PingGround = "PingGround";
+const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
 const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
@@ -35,6 +35,7 @@ const char *TOPIC_CurrentMotorState = "CurrentMotorState";
 bool blink_flag;   //Blink Flag interrupt
 bool tankresponsefun_flag;    //Tank ping response interrupt
 bool pingNow_flag;  //Tank ping interrupt
+bool waterTimer_flag;   //Water Timer interrupt
 bool motor_state;
 bool manualEnable;
 bool manual_state;
@@ -59,6 +60,8 @@ const float timer_s3 = 0;
  * Add delay everywhere we turn off motor to avoid immediate turn on
  * Maybe send manualOverride message less frequently to avoid wasting time at both ends.
  * Ticker tank_response;   //Probably can be removed
+ * const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
+ * Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)
  */
 
 void setupWiFi() {
@@ -85,12 +88,7 @@ void pingNow() {
 
 
 void waterTimer() {
-
-  if(motor_state) {
-    digitalWrite(Motor, LOW);
-    client.publish(TOPIC_CurrentMotorState, OFF);
-    motor_state = 0;
-  }
+  waterTimer_flag = 1;
 }
 
 
@@ -110,8 +108,9 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, MOTOR) | !strcmp(message, ALL)) {
       if(motor_state)
         {
-          digitalWrite(Motor, LOW);
           motor_state = 0;
+          digitalWrite(Motor, LOW);
+          client.publish(TOPIC_CurrentMotorState, OFF);
         }
       ESP.deepSleep(0);
     }
@@ -120,10 +119,10 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
     if(!strcmp(message, OFF)) {
       if(motor_state) {
-        digitalWrite(Motor, LOW);
         motor_state = 0;
-        water_timer.detach();
+        digitalWrite(Motor, LOW);
         client.publish(TOPIC_CurrentMotorState, OFF);
+        water_timer.detach(); //Turn off Fail-safe Timer
       }  
     }
     
@@ -178,27 +177,38 @@ void setup() {
   blink_flag = 0;
   tankresponsefun_flag = 0;
   pingNow_flag = 0;
+  waterTimer_flag = 0;
   
   
+  pinMode(LED_BUILTIN, OUTPUT);
   pinMode(Motor, OUTPUT);
   pinMode(ManualOverride, INPUT);
   pinMode(ManualControl, INPUT);
 
   bool manual = digitalRead(ManualOverride);
 
-  if(!manual)
-    digitalWrite(Motor, LOW);
+
 
   setupWiFi();
 
   client.setServer(host_name, 1883);
   client.setCallback(callback);
-
   connectMQTT();
-
-  client.publish(TOPIC_CurrentMotorState, OFF);
+  
+  for(int i=0; i<=10; i++){
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(500);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(500);
+  }
+  
+  if(!manual){
+    motor_state = 0;
+    digitalWrite(Motor, LOW);
+    client.publish(TOPIC_CurrentMotorState, OFF);
+  }
   ping_tank.attach(10, pingNow);
-  BlinkLED.attach(10, blinkfun);
+  BlinkLED.attach(5, blinkfun);
 }
 
 
@@ -243,7 +253,7 @@ void loop() {
         tank_responsive = 1;
       }
       else {
-        if(no_response_count < 3)
+        if(no_response_count < 10)
           ++no_response_count;
       }
     }  
@@ -255,6 +265,15 @@ void loop() {
     pingTime = millis();
     tank_response.once(14, tankresponsefun);
     pingNow_flag = 0; 
+  }
+  
+  if(waterTimer_flag){
+    if(motor_state) {
+      motor_state = 0;
+      digitalWrite(Motor, LOW);
+      client.publish(TOPIC_CurrentMotorState, OFF);
+    }
+    waterTimer_flag = 0;
   }
   
   manualEnable = digitalRead(ManualOverride);
@@ -280,15 +299,17 @@ void loop() {
 
     if(!client.connected())   //Make sure MQTT is connected
       connectMQTT();
-
-    if(no_response_count > 2) {
+    
+    client.publish(TOPIC_ManualOverride, OFF);
+    
+    if(no_response_count > 2) { //Wait for 3 response failures
       tank_responsive = 0;
       motor_state = 0;
       digitalWrite(Motor, LOW);
+      client.publish(TOPIC_CurrentMotorState, OFF);
     }  
-
-    client.publish(TOPIC_ManualOverride, OFF);
+    
     client.loop();
   }
-  delay(Seconds(1));
+  delay(Seconds(0.05));
 }
