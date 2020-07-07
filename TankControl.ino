@@ -1,6 +1,6 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
-#include <Ticker.h>
+#include <Ticker.h>   
 #include <EEPROM.h>
 
 #define Seconds(s) s*1000
@@ -8,10 +8,10 @@
 #define MAX_MSG_LENGTH 25
 
 //  Pin numbers of the sensor
-#define Sensor1 1
-#define Sensor2 3
-#define Sensor3 4
-#define EEPROM_init_pin 5
+#define Sensor1 D5
+#define Sensor2 D6
+#define Sensor3 D7
+#define EEPROM_init_pin D1
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -24,9 +24,9 @@
 #define TANK "TANK"
  
 
-const char *ssid = "BCWifi";
-const char *password = "Swamy";
-const char *host_name = "hostname_goes_here";
+const char *ssid = "Likith Srinivas’s iPhone";
+const char *password = "123456789";
+const char *host_name = "172.20.10.3";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
@@ -84,7 +84,7 @@ void blinkfun() {
 void setup() {
   
   /*Likith Code Edit: comments to be removed Start*/
-//  Serial.begin(115200);  
+//  Serial.begin(9600);  
   /*Likith Code Edit: comments to be removed End*/
 
   blink_flag = 0;
@@ -97,6 +97,7 @@ void setup() {
   pinMode(Sensor3, INPUT);
   pinMode(EEPROM_init_pin, INPUT);
   pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
 
   setupWiFi();
 
@@ -109,11 +110,11 @@ void setup() {
 
   
   if(EEPROM.read(0)) {
-    client.publish(TOPIC_SensorMalfunction, ON, 2, true);
+    client.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
     sensor_malfunction = 1;
   }
   else {
-    client.publish(TOPIC_SensorMalfunction, OFF, 3, true);
+    client.publish(TOPIC_SensorMalfunction, (uint8_t*)OFF, 3, true);
   }
  
   for(int i=0; i<=10; i++){
@@ -121,6 +122,7 @@ void setup() {
     delay(500);
     digitalWrite(LED_BUILTIN, HIGH);
     delay(500);
+    
   }
  
   BlinkLED.attach(5, blinkfun);
@@ -184,7 +186,6 @@ void resetVar() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  
   if(blink_flag){
     digitalWrite(LED_BUILTIN, LOW);  //Active low
     delay(500);
@@ -276,5 +277,5 @@ void loop() {
   }
   
   client.loop();
-  delay(Seconds(0.05));
+  delay(Seconds(0.5));
 }
