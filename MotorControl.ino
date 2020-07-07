@@ -6,9 +6,9 @@
 #define Minutes(m) m*Seconds(60)
 #define MAX_MSG_LENGTH 25
 
-#define Motor 1
-#define ManualOverride 3
-#define ManualControl 4
+#define Motor D5
+#define ManualOverride D6
+#define ManualControl D7
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -20,9 +20,9 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "BCWifi";
-const char *password = "Swamy";
-const char *host_name = "hostname_goes_here";
+const char *ssid = "Likith Srinivas’s iPhone";
+const char *password = "123456789";
+const char *host_name = "172.20.10.3";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
 const char *TOPIC_SysKill = "SysKill";
@@ -73,8 +73,8 @@ void setupWiFi() {
   WiFi.begin(ssid, password);
   while(WiFi.status() != WL_CONNECTED) {
     manual = digitalRead(ManualOverride);
-    if(manual)
-      break;
+//    if(manual)
+//      break;
     delay(300);
   }  
 }
@@ -185,7 +185,8 @@ void setup() {
   pinMode(Motor, OUTPUT);
   pinMode(ManualOverride, INPUT);
   pinMode(ManualControl, INPUT);
-
+  digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
+  delay(1000);
   bool manual = digitalRead(ManualOverride);
 
 
@@ -219,8 +220,8 @@ void connectMQTT() {
   while (!client.connected()) {
 
     manual = digitalRead(ManualOverride);
-    if(manual)
-      break;
+//    if(manual)
+//      break;
     String clientID = "BCground-";
     clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
