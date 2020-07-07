@@ -63,6 +63,8 @@ const float timer_s3 = 0;
  * const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
  * Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)
  * Add error message when motor is Turned OFF via Timer
+ * Delay("Or thought to be given") to be added during Manual Overide ON to OFF(turned to Auto) Transition, To avoid toggle of Motor from Off(due to Manual Overide to On(due to auto) 
+ * Manual Overide-> "break;" in setupWiFi & connectMQTT to be addressed.
  */
 
 void setupWiFi() {
@@ -73,8 +75,8 @@ void setupWiFi() {
   WiFi.begin(ssid, password);
   while(WiFi.status() != WL_CONNECTED) {
     manual = digitalRead(ManualOverride);
-//    if(manual)
-//      break;
+    if(manual)
+      break;
     delay(300);
   }  
 }
@@ -220,8 +222,8 @@ void connectMQTT() {
   while (!client.connected()) {
 
     manual = digitalRead(ManualOverride);
-//    if(manual)
-//      break;
+    if(manual)
+      break;
     String clientID = "BCground-";
     clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
