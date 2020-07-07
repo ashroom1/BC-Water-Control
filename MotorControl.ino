@@ -62,6 +62,7 @@ const float timer_s3 = 0;
  * Ticker tank_response;   //Probably can be removed
  * const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
  * Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)
+ * Add error message when motor is Turned OFF via Timer
  */
 
 void setupWiFi() {
