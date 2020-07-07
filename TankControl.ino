@@ -163,6 +163,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, ON)) {
       sensor_malfunction = 0;
       EEPROM.write(0, 0);
+      client.publish(TOPIC_SensorMalfunction, (uint8_t*)OFF, 3, true);
     }  
 
   if(!strcmp(msgTopic, TOPIC_SysKill))
