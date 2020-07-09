@@ -31,11 +31,14 @@ const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_ManualOverride = "ManualOverride";
 const char *TOPIC_MotorReset = "MotorReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";
+const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";
+const char *TOPIC_GroundReset = "GroundReset";    //To know if motor control board is resetting often.
 
 bool blink_flag;   //Blink Flag interrupt
 bool tankresponsefun_flag;    //Tank ping response interrupt
 bool pingNow_flag;  //Tank ping interrupt
 bool waterTimer_flag;   //Water Timer interrupt
+bool pureTimer_flag;    //True when solar timer enabled
 bool motor_state;
 bool manualEnable;
 bool manual_state;
@@ -65,6 +68,8 @@ const float timer_s3 = 0;
  * Add error message when motor is Turned OFF via Timer
  * Delay("Or thought to be given") to be added during Manual Overide ON to OFF(turned to Auto) Transition, To avoid toggle of Motor from Off(due to Manual Overide to On(due to auto) 
  * Manual Overide-> "break;" in setupWiFi & connectMQTT to be addressed.
+ * Board reset counter to be maintained in EEPROM and sent if requested through MQTT(new topic maybe required).
+ * Implement function to turn ON/OFF motor instead of repeating code.
  */
 
 void setupWiFi() {
@@ -132,6 +137,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, ON_WITH_TIMER)) {
       if(!motor_state) {
         motor_state = 1;
+        pureTimer_flag = 1;
         digitalWrite(Motor, HIGH);
         client.publish(TOPIC_CurrentMotorState, ON);
         water_timer.once(timer_pure_seconds, waterTimer);
@@ -181,6 +187,7 @@ void setup() {
   tankresponsefun_flag = 0;
   pingNow_flag = 0;
   waterTimer_flag = 0;
+  pureTimer_flag = 0;
   
   
   pinMode(LED_BUILTIN, OUTPUT);
@@ -191,13 +198,13 @@ void setup() {
   delay(1000);
   bool manual = digitalRead(ManualOverride);
 
-
-
   setupWiFi();
 
   client.setServer(host_name, 1883);
   client.setCallback(callback);
   connectMQTT();
+ 
+  client.publish(TOPIC_GroundReset, ON); 
   
   for(int i=0; i<=10; i++){
     digitalWrite(LED_BUILTIN, LOW);
@@ -278,6 +285,12 @@ void loop() {
       client.publish(TOPIC_CurrentMotorState, OFF);
     }
     waterTimer_flag = 0;
+    
+    if(pureTimer_flag)
+      pureTimer_flag = 0;
+    else
+      client.publish(TOPIC_MotorTimeoutWarning, ON);
+    
   }
   
   manualEnable = digitalRead(ManualOverride);
@@ -310,6 +323,7 @@ void loop() {
       tank_responsive = 0;
       motor_state = 0;
       digitalWrite(Motor, LOW);
+      water_timer.detach();   //Turn off Fail-safe Timer
       client.publish(TOPIC_CurrentMotorState, OFF);
     }  
     
