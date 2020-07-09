@@ -54,6 +54,8 @@ const float timer_solar_seconds = 1;
  * Unique LED pattern for WiFi, MQTT etc.
  * Motor control program TBD - Reset motor timer for every ON message.
  * //const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle, Also check the callback
+ * Solar time elapsed but sensor still zero = error(Solar sensor malfunction).
+ * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
  */
 
 bool blink_flag;   //Blink Flag interrupt
@@ -69,7 +71,7 @@ Ticker timer_to_reset;
 Ticker BlinkLED;
 
 void setupWiFi() {
-
+ 
   delay(10);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
@@ -100,13 +102,16 @@ void setup() {
   digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
 
   setupWiFi();
-
+  EEPROM.begin(10);
+ 
   client.setServer(host_name, 1883);
   client.setCallback(callback);
   connectMQTT();
 
-  if(digitalRead(EEPROM_init_pin)) 
+  if(digitalRead(EEPROM_init_pin)) {
     EEPROM.write(0, 0);
+    EEPROM.end();
+  }
 
   
   if(EEPROM.read(0)) {
@@ -163,6 +168,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, ON)) {
       sensor_malfunction = 0;
       EEPROM.write(0, 0);
+      EEPROM.end();
       client.publish(TOPIC_SensorMalfunction, (uint8_t*)OFF, 3, true);
     }  
 
@@ -239,6 +245,7 @@ void loop() {
       //Sensor malfunction
   
       EEPROM.write(0, 1);
+      EEPROM.end();
      
       client.publish(TOPIC_SensorMalfunction, ON);
       motor_state = 0;
