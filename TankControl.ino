@@ -56,6 +56,8 @@ const float timer_solar_seconds = 1;
  * //const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle, Also check the callback
  * Solar time elapsed but sensor still zero = error(Solar sensor malfunction).
  * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
+ * Should we add while(!EEPROM.commit())? delay()?
+ * Take feedback from broker about Sensor Malfunction after tank reset.
  */
 
 bool blink_flag;   //Blink Flag interrupt
@@ -247,7 +249,7 @@ void loop() {
       EEPROM.write(0, 1);
       EEPROM.end();
      
-      client.publish(TOPIC_SensorMalfunction, ON);
+      cclient.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
       motor_state = 0;
       client.publish(TOPIC_MotorChange, OFF);   //Safety
       
