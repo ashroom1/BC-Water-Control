@@ -25,9 +25,9 @@
 #define TANK "TANK"
  
 
-const char *ssid = "Likith Srinivas’s iPhone";
-const char *password = "123456789";
-const char *host_name = "172.20.10.3";
+const char *ssid = "likith12345";
+const char *password = "*druthi#";
+const char *host_name = "192.168.0.100";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
@@ -36,10 +36,12 @@ const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
-// const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle
+const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
-const int timer_solar_seconds = 1; //Enter Solar tank Overflow Timer value in seconds
+const int timer_solar_seconds = 5; //Enter Solar tank Overflow Timer value in seconds
+
+unsigned long lastOffMessage_millis;
 
 
 /*
@@ -61,6 +63,7 @@ const int timer_solar_seconds = 1; //Enter Solar tank Overflow Timer value in se
  * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
  * Indentation to be taken care by Ashwin
  * String issue to be addressed for Memory overflow & Board RESET
+ * *********DONOT DELETE ANY CODE IN THE PROGRAM Without thorough CHECK*********
  */
 
 bool blink_flag;   //Blink Flag interrupt
@@ -69,6 +72,7 @@ bool solartimer_flag;      //True indicates that the motor is on a pure timer
 bool sensor_malfunction;
 bool s1 = 1, s2 = 1, s3 = 1, s1prev = 1, s2prev = 1, s3prev = 1;  //Sensor values
 bool sensorStatusFlag;  //Flag for sending status of all sensors for the first time
+bool onTimerFlag;
 
 WiFiClient wclient;
 PubSubClient client(wclient);
@@ -123,6 +127,8 @@ void setup() {
   solartimer_flag = 0;
   sensor_malfunction = 0;
   sensorStatusFlag = 1;
+  lastOffMessage_millis = 0;
+  onTimerFlag = 0;
   
   pinMode(SENSOR1, INPUT);
   pinMode(SENSOR2, INPUT);
@@ -249,9 +255,10 @@ void loop() {
   if(!client.connected())   //Make sure MQTT is connected
     connectMQTT();
  
-  if(solartimer_flag) {
+  if(solartimer_flag ) {
     motor_state = 0;
     solartimer_flag = 0;
+    onTimerFlag = 0;
     client.publish(TOPIC_MotorChange, OFF);
   }
 
@@ -287,7 +294,7 @@ void loop() {
   
       EEPROM_write(1);
      
-      cclient.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
+      client.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
       motor_state = 0;
       client.publish(TOPIC_MotorChange, OFF);   //Safety
       
@@ -297,7 +304,7 @@ void loop() {
     else if (s2 && !s3 && s1) {
       //Use timer to turn on
       client.publish(TOPIC_MotorChange, ON_WITH_TIMER);
-     
+      onTimerFlag = 1;
       if(!motor_state) {
         motor_state = 1;
         timer_to_reset.once(timer_solar_seconds, resetVar);
@@ -312,7 +319,7 @@ void loop() {
       }
     } 
   
-    else {
+    else if(!onTimerFlag){  //if solar timer is On don't send off message
       if(!motor_state){
         if(millis() - lastOffMessage_millis >= OFF_MESSAGE_FREQ_MILLISEC){
           client.publish(TOPIC_MotorChange, OFF);
