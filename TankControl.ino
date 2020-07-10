@@ -52,14 +52,13 @@ const int timer_solar_seconds = 1; //Enter Solar tank Overflow Timer value in se
  * ??Add more delays or yields??
  * ??Change sleep time for when motor is ON on a timer??
  * ??When tank reset detach all tickers??
+ * --Should we add while(!EEPROM.commit())? delay()? -> instead read and write to a variable on status--
  * To check - MQTT persistence
  * Trigger solar tank timer when solar tank 0 to 1. (Take care of solar sensor malfunction)
  * Solar time elapsed but sensor still zero = error(Solar sensor malfunction).
  * Take feedback from broker about Sensor Malfunction after tank reset.
  * Motor control program TBD - Reset motor timer for every ON message.
- 
  * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
- * Should we add while(!EEPROM.commit())? delay()? -> instead read and write to a variable on status
  * Indentation to be taken care by Ashwin
  * String issue to be addressed for Memory overflow & Board RESET
  */
@@ -99,8 +98,25 @@ void blinkfun() {
   blink_flag = 1;
 }
 
-void setup() {
+bool EEPROM_write(int value_to_be_written) {
   
+  if(EEPROM.read(0) == value_to_be_written)
+    return true;
+  else {
+    for(int i = 0; i < 5; i++) {
+      EEPROM.write(0, value_to_be_written);
+      if(EEPROM.commit()){
+        EEPROM.end();
+        return true;
+      }
+      EEPROM.end();
+      delay(10);
+    }
+  }
+  return false;
+}
+
+void setup() {
   
   blink_flag = 0;
   motor_state = 0;
@@ -122,11 +138,8 @@ void setup() {
   client.setCallback(callback);
   connectMQTT();
 
-  if(digitalRead(EEPROM_INIT_PIN)) {
-    EEPROM.write(0, 0);
-    EEPROM.end();
-  }
-
+  if(digitalRead(EEPROM_INIT_PIN)) 
+    EEPROM_write(0);
   
   if(EEPROM.read(0)) {
     client.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
@@ -189,8 +202,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
   if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
     if(!strcmp(message, ON)) {
       sensor_malfunction = 0;
-      EEPROM.write(0, 0);
-      EEPROM.end();
+      EEPROM_write(0);
       client.publish(TOPIC_SensorMalfunction, (uint8_t*)OFF, 3, true);
     }  
 
@@ -273,8 +285,7 @@ void loop() {
     else if(s2 && !s1) {
       //Sensor malfunction
   
-      EEPROM.write(0, 1);
-      EEPROM.end();
+      EEPROM_write(1);
      
       cclient.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
       motor_state = 0;
