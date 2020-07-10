@@ -3,16 +3,16 @@
 #include <Ticker.h>   
 #include <EEPROM.h>
 
-#define Seconds(s) s*1000
-#define Minutes(m) m*Seconds(60)
-#define OFF_MESSAGE_FREQ_MILLISEC Seconds(5)
+#define SECONDS(s) s*1000
+#define MINUTES(m) m*SECONDS(60) //Currently not used
+#define OFF_MESSAGE_FREQ_MILLISEC SECONDS(5)
 #define MAX_MSG_LENGTH 25
 
 //  Pin numbers of the sensor
-#define Sensor1 D5
-#define Sensor2 D6
-#define Sensor3 D7
-#define EEPROM_init_pin D1
+#define SENSOR1 D5
+#define SENSOR2 D6
+#define SENSOR3 D7
+#define EEPROM_INIT_PIN D1
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -39,7 +39,7 @@ const char *TOPIC_TankResponse = "TankResponse";
 // const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
-const float timer_solar_seconds = 1;
+const int timer_solar_seconds = 1; //Enter Solar tank Overflow Timer value in seconds
 
 
 /*
@@ -47,19 +47,21 @@ const float timer_solar_seconds = 1;
  * --Send on message repeatedly--
  * --Don't care-> Send on if on or off if off: Currently sending only OFF msg--
  * --Delay to be given for off message frequency.--
+ * --Unique LED pattern for WiFi, MQTT etc.--
+ * --//const char TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle, Also check the callback--
  * ??Add more delays or yields??
  * ??Change sleep time for when motor is ON on a timer??
  * ??When tank reset detach all tickers??
- * To check - persistence
+ * To check - MQTT persistence
  * Trigger solar tank timer when solar tank 0 to 1. (Take care of solar sensor malfunction)
- * Unique LED pattern for WiFi, MQTT etc.
- * Motor control program TBD - Reset motor timer for every ON message.
- * //const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle, Also check the callback
  * Solar time elapsed but sensor still zero = error(Solar sensor malfunction).
- * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
- * Should we add while(!EEPROM.commit())? delay()?
  * Take feedback from broker about Sensor Malfunction after tank reset.
- * Macros to be changed to Capital Letters
+ * Motor control program TBD - Reset motor timer for every ON message.
+ 
+ * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
+ * Should we add while(!EEPROM.commit())? delay()? -> instead read and write to a variable on status
+ * Indentation to be taken care by Ashwin
+ * String issue to be addressed for Memory overflow & Board RESET
  */
 
 bool blink_flag;   //Blink Flag interrupt
@@ -80,8 +82,17 @@ void setupWiFi() {
   delay(10);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  while(WiFi.status() != WL_CONNECTED)
-    delay(Seconds(1));
+  while(WiFi.status() != WL_CONNECTED){
+    //Blink Fast for WiFi Status(Not Connected) indication
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(250);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(250); 
+    digitalWrite(LED_BUILTIN, LOW);
+    delay(250);
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(250); 
+  }  
 }
 
 void blinkfun() {
@@ -97,10 +108,10 @@ void setup() {
   sensor_malfunction = 0;
   sensorStatusFlag = 1;
   
-  pinMode(Sensor1, INPUT);
-  pinMode(Sensor2, INPUT);
-  pinMode(Sensor3, INPUT);
-  pinMode(EEPROM_init_pin, INPUT);
+  pinMode(SENSOR1, INPUT);
+  pinMode(SENSOR2, INPUT);
+  pinMode(SENSOR3, INPUT);
+  pinMode(EEPROM_INIT_PIN, INPUT);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
 
@@ -111,7 +122,7 @@ void setup() {
   client.setCallback(callback);
   connectMQTT();
 
-  if(digitalRead(EEPROM_init_pin)) {
+  if(digitalRead(EEPROM_INIT_PIN)) {
     EEPROM.write(0, 0);
     EEPROM.end();
   }
@@ -129,8 +140,7 @@ void setup() {
     digitalWrite(LED_BUILTIN, LOW);
     delay(500);
     digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    
+    delay(500);  
   }
  
   BlinkLED.attach(5, blinkfun);
@@ -149,8 +159,17 @@ void connectMQTT() {
       client.subscribe(TOPIC_PingTank);
       client.subscribe(TOPIC_SensorMalfunctionReset);
     }
-    else
-      delay(Seconds(2.5));  //Try again after a while
+    else {
+       //Blink Fast for WiFi Status(Not Connected) indication
+      digitalWrite(LED_BUILTIN, LOW);
+      delay(700);
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(300); 
+      digitalWrite(LED_BUILTIN, LOW);
+      delay(700);
+      digitalWrite(LED_BUILTIN, HIGH);
+      delay(300); 
+    }
   }
 }
 
@@ -179,14 +198,23 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, TANK) || !strcmp(message, ALL))
       ESP.deepSleep(0);   //Disable system if asked to
  
-/************************************************
+/****Story start****
+ * Once upon a time in Ground, Board got Reset, when motor was ON.
+ * Hence a Message was sent to Tank to indicate Reset of Ground,
+ * which was analysed by Tank to sort the problem faced during don't care condition.
+ * Where ON message was not sent continuously (doing so would lead to other problems)
+ * and Tank wouldn't send any messages (ON or OFF). This created a problem i.e., 
+ * Ground would be in OFF state where as Tank would say motor is ON. To solve this
+ * Turn OFF motor when Ground RESET is received.
+ ****Story end****/
   if(!strcmp(msgTopic, TOPIC_GroundReset))
     if(!strcmp(message, ON))
       {
         motor_state = 0;
         client.publish(TOPIC_MotorChange, OFF);
+        lastOffMessage_millis = millis();
       }
-************************************************/      
+      
  
 }
 
@@ -219,9 +247,9 @@ void loop() {
   s2prev = s2;
   s3prev = s3;
 
-  s1 = digitalRead(Sensor1);
-  s2 = digitalRead(Sensor2);
-  s3 = digitalRead(Sensor3);
+  s1 = digitalRead(SENSOR1);
+  s2 = digitalRead(SENSOR2);
+  s3 = digitalRead(SENSOR3);
 
   if(!sensor_malfunction) {     //If sensor malfunction, do nothing
    
@@ -294,15 +322,14 @@ void loop() {
       client.publish(TOPIC_MainTankMid, (uint8_t*)(s3 ? ON : OFF), (s3 ? 2 : 3), true);
       sensorStatusFlag = 0;
     }
+   
     else {
     s1 ^ s1prev ? client.publish(TOPIC_MainTankMid, (uint8_t*)(s1 ? ON : OFF), (s1 ? 2 : 3), true) : 0;
     s2 ^ s2prev ? client.publish(TOPIC_MainTankMid, (uint8_t*)(s2 ? ON : OFF), (s2 ? 2 : 3), true) : 0;
     s3 ^ s3prev ? client.publish(TOPIC_MainTankMid, (uint8_t*)(s3 ? ON : OFF), (s3 ? 2 : 3), true) : 0;
-    }
-  
-   
+    }   
   }
   
   client.loop();
-  delay(Seconds(0.5));
+  delay(SECONDS(0.5));
 }
