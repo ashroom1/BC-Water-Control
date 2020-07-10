@@ -20,9 +20,9 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "Likith Srinivas’s iPhone";
-const char *password = "123456789";
-const char *host_name = "172.20.10.3";
+const char *ssid = "likith12345";
+const char *password = "*druthi#";
+const char *host_name = "192.168.0.100";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
 const char *TOPIC_SysKill = "SysKill";
@@ -54,10 +54,10 @@ Ticker water_timer;
 WiFiClient wclient;
 PubSubClient client(wclient);
 
-const float timer_pure_seconds = 0;
-const float timer_s1s3 = 0;
-const float timer_s1 = 0;
-const float timer_s3 = 0;
+const float timer_pure_seconds = 5;
+const float timer_s1s3 = 10;
+const float timer_s1 = 15;
+const float timer_s3 = 20;
 
 /*
  *(1) Manual Overide-> "break;" in setupWiFi & connectMQTT to be addressed.
