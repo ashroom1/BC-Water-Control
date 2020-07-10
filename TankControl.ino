@@ -5,6 +5,7 @@
 
 #define Seconds(s) s*1000
 #define Minutes(m) m*Seconds(60)
+#define OFF_MESSAGE_FREQ_MILLISEC Seconds(5)
 #define MAX_MSG_LENGTH 25
 
 //  Pin numbers of the sensor
@@ -43,14 +44,14 @@ const float timer_solar_seconds = 1;
 
 /*
  * --Save sensor malfunction in EEPROM--
- * ??Add more delays or yields??
- * Trigger solar tank timer when solar tank 0 to 1. (Take care of solar sensor malfunction)
- * ??Change sleep time for when motor is ON on a timer??
  * --Send on message repeatedly--
- * To check - persistence
+ * --Don't care-> Send on if on or off if off: Currently sending only OFF msg--
+ * --Delay to be given for off message frequency.--
+ * ??Add more delays or yields??
+ * ??Change sleep time for when motor is ON on a timer??
  * ??When tank reset detach all tickers??
- * --Don't care-> Send on if on or off if off--
- * Delay to be given for off message frequency.
+ * To check - persistence
+ * Trigger solar tank timer when solar tank 0 to 1. (Take care of solar sensor malfunction)
  * Unique LED pattern for WiFi, MQTT etc.
  * Motor control program TBD - Reset motor timer for every ON message.
  * //const char *TOPIC_GroundReset = "GroundReset"; //To be checked Motor ON/OFF Condition- Toggle, Also check the callback
@@ -58,6 +59,7 @@ const float timer_solar_seconds = 1;
  * State machine to be analysed and implemented to detect illegal state changes (Eg. Sensor[main mid, main overflow, solar] [000] to [100] not possible).
  * Should we add while(!EEPROM.commit())? delay()?
  * Take feedback from broker about Sensor Malfunction after tank reset.
+ * Macros to be changed to Capital Letters
  */
 
 bool blink_flag;   //Blink Flag interrupt
@@ -65,6 +67,7 @@ bool motor_state;   //Current state of the motor
 bool solartimer_flag;      //True indicates that the motor is on a pure timer
 bool sensor_malfunction;
 bool s1 = 1, s2 = 1, s3 = 1, s1prev = 1, s2prev = 1, s3prev = 1;  //Sensor values
+bool sensorStatusFlag;  //Flag for sending status of all sensors for the first time
 
 WiFiClient wclient;
 PubSubClient client(wclient);
@@ -87,14 +90,12 @@ void blinkfun() {
 
 void setup() {
   
-  /*Likith Code Edit: comments to be removed Start*/
-//  Serial.begin(9600);  
-  /*Likith Code Edit: comments to be removed End*/
-
+  
   blink_flag = 0;
   motor_state = 0;
   solartimer_flag = 0;
   sensor_malfunction = 0;
+  sensorStatusFlag = 1;
   
   pinMode(Sensor1, INPUT);
   pinMode(Sensor2, INPUT);
@@ -223,8 +224,6 @@ void loop() {
   s3 = digitalRead(Sensor3);
 
   if(!sensor_malfunction) {     //If sensor malfunction, do nothing
-
-//    if((!s2 && !s3) || (!s2 && !s1)) {
    
     if(!s2 && (!s3 || !s1)) {
      
@@ -257,33 +256,51 @@ void loop() {
     }
     
     else if (s2 && !s3 && s1) {
-  
       //Use timer to turn on
-      //if(!motor_state) {
       client.publish(TOPIC_MotorChange, ON_WITH_TIMER);
+     
       if(!motor_state) {
         motor_state = 1;
         timer_to_reset.once(timer_solar_seconds, resetVar);
       }
-      //}
     }
   
     else if (s1 && !s2 && s3) {
       //Don't care
-      if (!motor_state)
-         client.publish(TOPIC_MotorChange, OFF);
+      if ((!motor_state) && (millis() - lastOffMessage_millis >= OFF_MESSAGE_FREQ_MILLISEC)){
+        client.publish(TOPIC_MotorChange, OFF);
+        lastOffMessage_millis = millis();
+      }
     } 
   
     else {
-      client.publish(TOPIC_MotorChange, OFF);
-      motor_state = 0;  
+      if(!motor_state){
+        if(millis() - lastOffMessage_millis >= OFF_MESSAGE_FREQ_MILLISEC){
+          client.publish(TOPIC_MotorChange, OFF);
+          lastOffMessage_millis = millis();
+        }
+      }
+      else {
+        client.publish(TOPIC_MotorChange, OFF);
+        motor_state = 0;         
+        lastOffMessage_millis = millis();
+      }
     }
   
     //Report changes to sensor values
-    s1 ^ s1prev ? client.publish(TOPIC_MainTankMid, s1 ? ON : OFF) : 0;
-    s2 ^ s2prev ? client.publish(TOPIC_MainTankOVF, s2 ? ON : OFF) : 0;
-    s3 ^ s3prev ? client.publish(TOPIC_SolarTankMid, s3 ? ON : OFF) : 0;
+    if (sensorStatusFlag){   //
+      client.publish(TOPIC_MainTankMid, (uint8_t*)(s1 ? ON : OFF), (s1 ? 2 : 3), true);
+      client.publish(TOPIC_MainTankMid, (uint8_t*)(s2 ? ON : OFF), (s2 ? 2 : 3), true);
+      client.publish(TOPIC_MainTankMid, (uint8_t*)(s3 ? ON : OFF), (s3 ? 2 : 3), true);
+      sensorStatusFlag = 0;
+    }
+    else {
+    s1 ^ s1prev ? client.publish(TOPIC_MainTankMid, (uint8_t*)(s1 ? ON : OFF), (s1 ? 2 : 3), true) : 0;
+    s2 ^ s2prev ? client.publish(TOPIC_MainTankMid, (uint8_t*)(s2 ? ON : OFF), (s2 ? 2 : 3), true) : 0;
+    s3 ^ s3prev ? client.publish(TOPIC_MainTankMid, (uint8_t*)(s3 ? ON : OFF), (s3 ? 2 : 3), true) : 0;
+    }
   
+   
   }
   
   client.loop();
