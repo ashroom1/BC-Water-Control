@@ -55,6 +55,7 @@ unsigned long lastOffMessage_millis;
  * ??Change sleep time for when motor is ON on a timer??
  * ??When tank reset detach all tickers??
  * --Should we add while(!EEPROM.commit())? delay()? -> instead read and write to a variable on status--
+ * When motor is turned off by timer, tank should stop sending ON messages and even if it sends them motor should ignore it. POssible solution is to introduce a similar flag to sensor_malfunction in motor which will help ignore all tank messages until the variable is reset. This is to prevent overflow.
  * To check - MQTT persistence
  * Trigger solar tank timer when solar tank 0 to 1. (Take care of solar sensor malfunction)
  * Solar time elapsed but sensor still zero = error(Solar sensor malfunction).
@@ -73,6 +74,8 @@ bool sensor_malfunction;
 bool s1 = 1, s2 = 1, s3 = 1, s1prev = 1, s2prev = 1, s3prev = 1;  //Sensor values
 bool sensorStatusFlag;  //Flag for sending status of all sensors for the first time
 bool onTimerFlag;
+bool EEPROM_Write_Flag;
+bool EEPROM_Value_To_Write;
 
 WiFiClient wclient;
 PubSubClient client(wclient);
@@ -129,6 +132,7 @@ void setup() {
   sensorStatusFlag = 1;
   lastOffMessage_millis = 0;
   onTimerFlag = 0;
+  EEPROM_Write_Flag = 0;
   
   pinMode(SENSOR1, INPUT);
   pinMode(SENSOR2, INPUT);
@@ -144,8 +148,10 @@ void setup() {
   client.setCallback(callback);
   connectMQTT();
 
-  if(digitalRead(EEPROM_INIT_PIN)) 
-    EEPROM_write(0);
+  if(digitalRead(EEPROM_INIT_PIN)) {
+    EEPROM_Value_To_Write = 0;
+    EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+  }
   
   if(EEPROM.read(0)) {
     client.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
@@ -208,7 +214,8 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
   if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
     if(!strcmp(message, ON)) {
       sensor_malfunction = 0;
-      EEPROM_write(0);
+      EEPROM_Value_To_Write = 0;
+      EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
       client.publish(TOPIC_SensorMalfunction, (uint8_t*)OFF, 3, true);
     }  
 
@@ -257,6 +264,9 @@ void loop() {
 
   if(!client.connected())   //Make sure MQTT is connected
     connectMQTT();
+  
+  if(EEPROM_Write_Flag)
+    EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
  
   if(solartimer_flag) {
     motor_state = 0;
@@ -296,7 +306,8 @@ void loop() {
     else if(s2 && !s1) {
       //Sensor malfunction
   
-      EEPROM_write(1);
+      EEPROM_Value_To_Write = 1;
+      EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
      
       client.publish(TOPIC_SensorMalfunction, (uint8_t*)ON, 2, true);
       motor_state = 0;
