@@ -24,14 +24,15 @@ const char *ssid = "likith12345";
 const char *password = "*druthi#";
 const char *host_name = "192.168.0.100";
 const char *TOPIC_MotorChange = "MotorStatusChange";
-const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant
+const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
+const char *TOPIC_GroundResponse = "GroundResponse";    //For broker to know if Motor board is working.
 const char *TOPIC_SysKill = "SysKill";
-const char *TOPIC_PingTank = "PingTank";
+const char *TOPIC_PingTank = "PingTank";        //Periodic message
 const char *TOPIC_TankResponse = "TankResponse";
-const char *TOPIC_ManualOverride = "ManualOverride";
-const char *TOPIC_MotorReset = "MotorReset";
-const char *TOPIC_CurrentMotorState = "CurrentMotorState";
-const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";
+const char *TOPIC_ManualOverride = "ManualOverride";        //Periodic message
+//const char *TOPIC_MotorReset = "MotorReset";      //Not used
+const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
+const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";      //To be handled in broker.
 const char *TOPIC_GroundReset = "GroundReset";    //To know if motor control board is resetting often.
 
 bool blink_flag;   //Blink Flag interrupt
@@ -61,39 +62,31 @@ const float timer_s3 = 20;
 
 /*
  *(1) Manual Overide-> "break;" in setupWiFi & connectMQTT to be addressed.
+ *(1) Maintain backlog messages to be sent if WiFi or MQTT does not connect.
+ *(1) Check manual override in ConnectMQTT and connectWifi and take action immediately on motor and also send "TOPIC_CurrentMotorState" and "TOPIC_ManualOverride" messages constantly in the loop.
  *(1) Introduce flags for Wifi and MQTT connected. If Wifi, don't attempt MQTT connection. If MQTT not connected don't attempt MQTT communication. Infinite while loops of MQTT and Wifi is a bad idea.
  *(1) Add error message when motor is Turned OFF via Timer
- *(1) Frequent ON-OFF/OFF-ON messages from tank control leads to error message and motor is turned OFF. ON-OFF transition cannot happen within a minimum specified timer(Ticker). Warning and error to be sent if such mulitple transitions happen.
- *(2) Delay("Or thought to be given") to be added during Manual Overide ON to OFF(turned to Auto) Transition, To avoid toggle of Motor from Off(due to Manual Overide to On(due to auto)
+ *(1) Frequent ON-OFF/OFF-ON messages from tank control leads to error message and motor is turned OFF. ON-OFF transition cannot happen within a minimum specified timer(Ticker). Warning and error to be sent if such multiple transitions happen.
+ *(2) Delay("Or thought to be given") to be added during Manual Override ON to OFF(turned to Auto) Transition, To avoid toggle of Motor from Off(due to Manual Override) to On(due to auto)
  *(2) Add delay everywhere we turn off motor to avoid immediate turn on
  *(3) Maybe send manualOverride message less frequently to avoid wasting time at both ends.
  *(3) Board reset counter to be maintained in EEPROM and sent if requested through MQTT(new topic maybe required).
  *(4) Ticker tank_response;   //Probably can be removed
  *(4) Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)
  *(4) Implement function to turn ON/OFF motor instead of repeating code.
- *(4) const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant -> Can be used by broker to make sure motor is active.
+ *(4) ??const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant -> Can be used by broker to make sure motor is active.??
  *(4) Remove String class - Can lead to board reset!!
 */
 
 void setupWiFi() {
 
-    bool manual;
-    delay(10);
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    while(WiFi.status() != WL_CONNECTED) {
-        manual = digitalRead(ManualOverride);
-        if(manual)
-            break;
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(250);
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(250);
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(250);
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(250);
-    }
+
+    bool manual = digitalRead(ManualOverride);
+    for(int i = 0; (i < (manual ? 3 : 10)) && (WiFi.status() != WL_CONNECTED); i++)
+        delay(200);
+
 }
 
 void tankresponsefun() {
@@ -119,6 +112,9 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         if(!strcmp(message, ON))
             lastTankResponse = millis();
 
+    if(!strcmp(msgTopic, TOPIC_PingGround))
+        if(!strcmp(message, ON))
+            check_and_publish(TOPIC_GroundResponse, ON, 0);
 
     if(!strcmp(msgTopic, TOPIC_SysKill))
         if(!strcmp(message, MOTOR) | !strcmp(message, ALL)) {
@@ -126,7 +122,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             {
                 motor_state = 0;
                 digitalWrite(Motor, LOW);
-                client.publish(TOPIC_CurrentMotorState, OFF);
+                check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
             }
             ESP.deepSleep(0);
         }
@@ -137,7 +133,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             if(motor_state) {
                 motor_state = 0;
                 digitalWrite(Motor, LOW);
-                client.publish(TOPIC_CurrentMotorState, OFF);
+                check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
                 water_timer.detach(); //Turn off Fail-safe Timer
             }
         }
@@ -147,7 +143,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
                 motor_state = 1;
                 pureTimer_flag = 1;
                 digitalWrite(Motor, HIGH);
-                client.publish(TOPIC_CurrentMotorState, ON);
+                check_and_publish(TOPIC_CurrentMotorState, ON, 0);
                 water_timer.once(timer_pure_seconds, waterTimer);
             }
         }
@@ -156,7 +152,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             if(!motor_state) {
                 motor_state = 1;
                 digitalWrite(Motor, HIGH);
-                client.publish(TOPIC_CurrentMotorState, ON);
+                check_and_publish(TOPIC_CurrentMotorState, ON, 0);
                 water_timer.once(timer_s1s3, waterTimer);
             }
         }
@@ -165,7 +161,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             if(!motor_state) {
                 motor_state = 1;
                 digitalWrite(Motor, HIGH);
-                client.publish(TOPIC_CurrentMotorState, ON);
+                check_and_publish(TOPIC_CurrentMotorState, ON, 0);
                 water_timer.once(timer_s1, waterTimer);
             }
         }
@@ -174,7 +170,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             if(!motor_state) {
                 motor_state = 1;
                 digitalWrite(Motor, HIGH);
-                client.publish(TOPIC_CurrentMotorState, ON);
+                check_and_publish(TOPIC_CurrentMotorState, ON, 0);
                 water_timer.once(timer_s3, waterTimer);
             }
         }
@@ -202,43 +198,48 @@ void setup() {
     pinMode(Motor, OUTPUT);
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
-    digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
+    digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     delay(1000);
-    bool manual = digitalRead(ManualOverride);
 
     setupWiFi();
 
     client.setServer(host_name, 1883);
     client.setCallback(callback);
-    connectMQTT();
 
-    client.publish(TOPIC_GroundReset, ON);
+    if (WiFi.status() == WL_CONNECTED)
+        connectMQTT();
 
-    for(int i=0; i<=10; i++){
+    check_and_publish(TOPIC_GroundReset, ON, 0);
+
+    for(int i = 0; i <= 10; i++){
         digitalWrite(LED_BUILTIN, LOW);
         delay(500);
         digitalWrite(LED_BUILTIN, HIGH);
         delay(500);
     }
 
+    bool manual = digitalRead(ManualOverride);
     if(!manual){
         motor_state = 0;
         digitalWrite(Motor, LOW);
-        client.publish(TOPIC_CurrentMotorState, OFF);
+        check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
     }
     ping_tank.attach(10, pingNow);
     BlinkLED.attach(5, blinkfun);
 }
 
+void check_and_publish(char *Topic, char *Message, bool Persistance) {
+
+    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
+        Persistance ? client.publish(Topic, Message, strlen(Message), true) : client.publish(Topic, Message);
+
+}
 
 void connectMQTT() {
 
-    bool manual;
-    while (!client.connected()) {
+    bool manual = digitalRead(ManualOverride);
+    for(int i = 0; (i < (manual ? 1 : 5)) && !client.connected(); i++) {
 
-        manual = digitalRead(ManualOverride);
-        if(manual)
-            break;
         String clientID = "BCground-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
@@ -246,16 +247,17 @@ void connectMQTT() {
             client.subscribe(TOPIC_TankResponse);
             client.subscribe(TOPIC_SysKill);
             client.subscribe(TOPIC_MotorChange);
+            client.subscribe(TOPIC_PingGround);
         }
         else {
             digitalWrite(LED_BUILTIN, LOW);
-            delay(700);
+            delay(100);
             digitalWrite(LED_BUILTIN, HIGH);
-            delay(300);
+            delay(100);
             digitalWrite(LED_BUILTIN, LOW);
-            delay(700);
+            delay(100);
             digitalWrite(LED_BUILTIN, HIGH);
-            delay(300);
+            delay(100);
         }
     }
 }
@@ -270,6 +272,19 @@ void loop() {
         digitalWrite(LED_BUILTIN, HIGH);
         blink_flag = 0;
     }
+
+    if(WiFi.status() != WL_CONNECTED) {
+        setupWiFi();
+    }
+
+    if(WiFi.status() != WL_CONNECTED) {        //Redundant "if" statement needed. Because we need to turn ON the LED only if Wifi is not connected.
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(10);
+    }
+
+    if(!client.connected() && (WiFi.status() == WL_CONNECTED))   //Make sure MQTT is connected
+        connectMQTT();
+
 
     if(tankresponsefun_flag) {
 
@@ -288,7 +303,7 @@ void loop() {
     }
 
     if(pingNow_flag) {
-        client.publish(TOPIC_PingTank, STATUS);
+        check_and_publish(TOPIC_PingTank, STATUS, 0);
         pingTime = millis();
         tank_response.once(14, tankresponsefun);
         pingNow_flag = 0;
@@ -298,49 +313,60 @@ void loop() {
         if(motor_state) {
             motor_state = 0;
             digitalWrite(Motor, LOW);
-            client.publish(TOPIC_CurrentMotorState, OFF);
+            check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
         }
         waterTimer_flag = 0;
 
         if(pureTimer_flag)
             pureTimer_flag = 0;
         else
-            client.publish(TOPIC_MotorTimeoutWarning, ON);
+            check_and_publish(TOPIC_MotorTimeoutWarning, ON, 0);
 
     }
 
+    bool manualEnablePrev = manualEnable;
     manualEnable = digitalRead(ManualOverride);
 
     if(manualEnable) {
-        client.publish(TOPIC_ManualOverride, ON);
+        check_and_publish(TOPIC_ManualOverride, ON, 0);
         manual_state = digitalRead(ManualControl);
 
         if(manual_state) {
             motor_state = 1;
             digitalWrite(Motor, HIGH);
-            client.publish(TOPIC_CurrentMotorState, ON);
+            check_and_publish(TOPIC_CurrentMotorState, ON, 0);
         }
         else {
             motor_state = 0;
             digitalWrite(Motor, LOW);
-            client.publish(TOPIC_CurrentMotorState, OFF);
+            check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
         }
     }
     else {
+        /*      Moved to top of loop
+
         if(WiFi.status() != WL_CONNECTED)
             setupWiFi();
 
-        if(!client.connected())   //Make sure MQTT is connected
+        if(!client.connected() && (WiFi.status() == WL_CONNECTED))   //Make sure MQTT is connected
             connectMQTT();
+        */
+        
+        if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
+        {
+            motor_state = 0;
+            digitalWrite(Motor, LOW);
+            check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
+        }
 
-        client.publish(TOPIC_ManualOverride, OFF);
+        check_and_publish(TOPIC_ManualOverride, OFF, 0);
 
         if(no_response_count > 2) { //Wait for 3 response failures
             tank_responsive = 0;
             motor_state = 0;
             digitalWrite(Motor, LOW);
             water_timer.detach();   //Turn off Fail-safe Timer
-            client.publish(TOPIC_CurrentMotorState, OFF);
+            check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
         }
 
         client.loop();
