@@ -219,7 +219,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 /****Story start****
  * Once upon a time in Ground, Board got Reset, when motor was ON.
  * Hence a Message was sent to Tank to indicate Reset of Ground,
- * which was analysed by Tank to sort the problem faced during don't care condition.
+ * which was analysed by Tank to sort the problem faced during don't care condition (Also overflow sensor failure).
  * Where ON message was not sent continuously (doing so would lead to other problems)
  * and Tank wouldn't send any messages (ON or OFF). This created a problem i.e., 
  * Ground would be in OFF state where as Tank would say motor is ON. To solve this
@@ -229,8 +229,11 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(message, ON))
       {
         motor_state = 0;
+        solartimer_flag = 0;
+        onTimerFlag = 0;
         client.publish(TOPIC_MotorChange, OFF);
         lastOffMessage_millis = millis();
+        timer_to_reset.detach();      //If motor was ON due to solar timer, we need to stop the ticker becasue the motor is now OFF.
       }
       
  
@@ -255,11 +258,12 @@ void loop() {
   if(!client.connected())   //Make sure MQTT is connected
     connectMQTT();
  
-  if(solartimer_flag ) {
+  if(solartimer_flag) {
     motor_state = 0;
     solartimer_flag = 0;
     onTimerFlag = 0;
     client.publish(TOPIC_MotorChange, OFF);
+    lastOffMessage_millis = millis();
   }
 
   s1prev = s1;
