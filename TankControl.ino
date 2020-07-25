@@ -28,7 +28,7 @@
 
 const char *ssid = "likith12345";
 const char *password = "*druthi#";
-const char *host_name = "192.168.0.100";
+const char *host_name = "192.168.0.106";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
@@ -107,11 +107,11 @@ void blinkfun() {
     blink_flag = 1;
 }
 
-void check_and_publish(char *Topic, char *Message, bool Persistance) {
+bool/*type added because ternary op was expecting to return value*/ check_and_publish(const char *Topic, const char *Message, bool Persistance) {
 
     if((WiFi.status() == WL_CONNECTED) && (client.connected()))
         Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
-
+    return 0;//See block comment above -bool, '0' is a dummy Value.
 }
 
 bool EEPROM_write(int value_to_be_written) {
