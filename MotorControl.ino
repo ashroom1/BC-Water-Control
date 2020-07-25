@@ -25,7 +25,7 @@
 
 const char *ssid = "likith12345";
 const char *password = "*druthi#";
-const char *host_name = "192.168.0.100";
+const char *host_name = "192.168.0.106";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
 const char *TOPIC_GroundResponse = "GroundResponse";    //For broker to know if Motor board is working.
@@ -182,7 +182,7 @@ void connectMQTT() {
     }
 }
 
-void check_and_publish(char *Topic, char *Message, bool Persistance) {
+void check_and_publish(const char *Topic, char *Message, bool Persistance) {
 
     if((WiFi.status() == WL_CONNECTED) && (client.connected()))
         Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
