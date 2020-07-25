@@ -5,6 +5,9 @@
 #define Seconds(s) s*1000
 #define Minutes(m) m*Seconds(60)
 #define MAX_MSG_LENGTH 25
+#define SOLAR_ILLEGAL_WAITTIME_SECONDS 600      //Time to be elapsed before the next ON_WITH_TIMER message is expected.
+#define PING_TANK_INTERVAL 6                    //Ping the tank this often
+#define TANK_RESPONSE_WAITTIME (PING_TANK_INTERVAL-1) //Wait for this
 
 #define Motor D5
 #define ManualOverride D6
@@ -47,6 +50,7 @@ bool motor_state;
 bool manualEnable;
 bool manual_state;
 bool tank_responsive;
+bool on_solar_illegal;      //TODO
 int no_response_count = 0;
 
 unsigned long lastTankResponse = 4294967294;
@@ -55,10 +59,11 @@ Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
 Ticker BlinkLED;
 Ticker water_timer;
+Ticker make_solar_legal;    //TODO
 WiFiClient wclient;
 PubSubClient client(wclient);
 
-const float timer_pure_seconds = 5;
+const float timer_pure_seconds = 5;     //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
 const float timer_s1s3 = 10;
 const float timer_s1 = 15;
 const float timer_s3 = 20;
@@ -81,6 +86,7 @@ const float timer_s3 = 20;
  *(4) ??Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)??
  *(4) ??Remove String class - Can lead to board reset!!??
  *(4) Ping tank more often when motor is ON
+ *
 */
 
 void check_manual() {
@@ -217,9 +223,13 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
         if(!strcmp(message, ON_WITH_TIMER)) {
             if(!motor_state) {
-                turn_on_motor();
-                pureTimer_flag = 1;
-                water_timer.once(timer_pure_seconds, waterTimer);
+                if (on_solar_illegal)       //TODO
+                    client.publish(TOPIC_SensorMalfunction, ON);
+                else {
+                    turn_on_motor();
+                    pureTimer_flag = 1;
+                    water_timer.once(timer_pure_seconds, waterTimer);
+                }
             }
         }
 
@@ -263,6 +273,11 @@ void pingNow() {
     pingNow_flag = 1;
 }
 
+void make_solar_legal_fun()     //TODO
+{
+    on_solar_illegal = 0;
+}
+
 //Program starts here
 void setup() {
     // put your setup code here, to run once:
@@ -275,6 +290,7 @@ void setup() {
     pingNow_flag = 0;
     waterTimer_flag = 0;
     pureTimer_flag = 0;
+    on_solar_illegal = 0;
 
 
     pinMode(LED_BUILTIN, OUTPUT);
@@ -305,7 +321,7 @@ void setup() {
     if(!manualEnable)
         turn_off_motor();
 
-    ping_tank.attach(10, pingNow);
+    ping_tank.attach(PING_TANK_INTERVAL, pingNow);
     BlinkLED.attach(5, blinkfun);
 }
 
@@ -334,7 +350,7 @@ void loop() {
 
         unsigned long elapsed = lastTankResponse - pingTime;
         if(abs(elapsed) < Minutes(48 * 60 /* 2 days */)) {       //Handle millis overflow
-            if(elapsed <= Seconds(7)) {
+            if(elapsed <= Seconds(TANK_RESPONSE_WAITTIME)) {
                 no_response_count = 0;
                 tank_responsive = 1;
             }
@@ -349,7 +365,7 @@ void loop() {
     if(pingNow_flag) {
         check_and_publish(TOPIC_PingTank, STATUS, 0);
         pingTime = millis();
-        tank_response.once(7, tankresponsefun);
+        tank_response.once(TANK_RESPONSE_WAITTIME, tankresponsefun);
         pingNow_flag = 0;
     }
 
@@ -362,8 +378,11 @@ void loop() {
 
         waterTimer_flag = 0;
 
-        if(pureTimer_flag)
+        if(pureTimer_flag) {
+            on_solar_illegal = 1;           //TODO
+            make_solar_legal.attach(SOLAR_ILLEGAL_WAITTIME_SECONDS, make_solar_legal_fun);   //TODO
             pureTimer_flag = 0;
+        }
         else {
             //Fatal error
             check_and_publish(TOPIC_MotorTimeoutWarning, ON, 1);    //Will be cleared by SensorMalfunctionReset by the tank
