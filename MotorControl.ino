@@ -139,13 +139,13 @@ void turn_off_motor() {
 }
 
 void setupWiFi() {
-
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
-
+  
     digitalWrite(LED_BUILTIN, LOW);     //LED always ON
-
-    while((WiFi.status() != WL_CONNECTED)) {
+    
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password); 
+    
+    while(  (WiFi.status() != WL_CONNECTED)) {
         delay(200);
         check_manual();
     }
@@ -158,6 +158,9 @@ void connectMQTT() {
 
     while(!client.connected()) {
 
+        if(WiFi.status() != WL_CONNECTED)
+            setupWiFi();
+          
         check_manual();
 
         String clientID = "BCground-";
@@ -283,6 +286,10 @@ void setup() {
     // put your setup code here, to run once:
 
     // Serial.begin(115200);
+
+    //MQTT Connect Timeout Decreased from 15 seconds to 5 seconds
+    // client.setSocketTimeout(5);
+    
     motor_state = 0;
     tank_responsive = 1;
     blink_flag = 0;
@@ -298,6 +305,7 @@ void setup() {
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
+    digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
 
     setupWiFi();
@@ -317,6 +325,7 @@ void setup() {
         delay(500);
     }
 
+    //Redundant To be checked if Off message is require at Start
     manualEnable = digitalRead(ManualOverride);
     if(!manualEnable)
         turn_off_motor();
