@@ -87,20 +87,14 @@ Ticker BlinkLED;
 
 void setupWiFi() {
 
+    digitalWrite(LED_BUILTIN, LOW);     //LED always ON in this function
     delay(10);
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    while(WiFi.status() != WL_CONNECTED){
-        //Blink Fast for WiFi Status(Not Connected) indication
-        digitalWrite(LED_BUILTIN, LOW);
+    while(WiFi.status() != WL_CONNECTED)
         delay(250);
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(250);
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(250);
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(250);
-    }
+    digitalWrite(LED_BUILTIN, HIGH);
+    delay(10);
 }
 
 void blinkfun() {
@@ -195,15 +189,15 @@ void connectMQTT() {
             client.subscribe(TOPIC_SensorMalfunction);
         }
         else {
-            //Blink Fast for WiFi Status(Not Connected) indication
+            //Blink Fast for MQTT Status(Not Connected) indication
             digitalWrite(LED_BUILTIN, LOW);
-            delay(700);
+            delay(100);
             digitalWrite(LED_BUILTIN, HIGH);
-            delay(300);
+            delay(100);
             digitalWrite(LED_BUILTIN, LOW);
-            delay(700);
+            delay(100);
             digitalWrite(LED_BUILTIN, HIGH);
-            delay(300);
+            delay(80);
         }
     }
 }
