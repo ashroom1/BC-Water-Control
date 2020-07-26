@@ -50,7 +50,7 @@ bool motor_state;
 bool manualEnable;
 bool manual_state;
 bool tank_responsive;
-bool on_solar_illegal;      //TODO
+bool on_solar_illegal;      
 int no_response_count = 0;
 
 unsigned long lastTankResponse = 4294967294;
@@ -59,7 +59,7 @@ Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
 Ticker BlinkLED;
 Ticker water_timer;
-Ticker make_solar_legal;    //TODO
+Ticker make_solar_legal;    
 WiFiClient wclient;
 PubSubClient client(wclient);
 
@@ -223,7 +223,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
         if(!strcmp(message, ON_WITH_TIMER)) {
             if(!motor_state) {
-                if (on_solar_illegal)       //TODO
+                if (on_solar_illegal)       
                     client.publish(TOPIC_SensorMalfunction, ON);
                 else {
                     turn_on_motor();
@@ -273,7 +273,7 @@ void pingNow() {
     pingNow_flag = 1;
 }
 
-void make_solar_legal_fun()     //TODO
+void make_solar_legal_fun()     
 {
     on_solar_illegal = 0;
 }
@@ -379,8 +379,8 @@ void loop() {
         waterTimer_flag = 0;
 
         if(pureTimer_flag) {
-            on_solar_illegal = 1;           //TODO
-            make_solar_legal.attach(SOLAR_ILLEGAL_WAITTIME_SECONDS, make_solar_legal_fun);   //TODO
+            on_solar_illegal = 1;           
+            make_solar_legal.attach(SOLAR_ILLEGAL_WAITTIME_SECONDS, make_solar_legal_fun);   
             pureTimer_flag = 0;
         }
         else {
