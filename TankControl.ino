@@ -88,11 +88,13 @@ Ticker BlinkLED;
 void setupWiFi() {
 
     digitalWrite(LED_BUILTIN, LOW);     //LED always ON in this function
-    delay(10);
+
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
+    
     while(WiFi.status() != WL_CONNECTED)
-        delay(250);
+        delay(200);
+    
     digitalWrite(LED_BUILTIN, HIGH);
     delay(10);
 }
@@ -176,7 +178,9 @@ void setup() {
 }
 
 void connectMQTT() {
-
+    if(WiFi.status() != WL_CONNECTED)
+        setupWiFi();
+    
     while (!client.connected()) {
         String clientID = "BCterrace-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
