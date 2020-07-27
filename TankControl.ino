@@ -42,6 +42,7 @@ const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge"; //To 
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
 const int timer_solar_seconds = 5; //Enter Solar tank Overflow Timer value in seconds
+// The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
 
 unsigned long lastOffMessage_millis;
 
@@ -91,96 +92,18 @@ void setupWiFi() {
 
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    
+
     while(WiFi.status() != WL_CONNECTED)
         delay(200);
-    
+
     digitalWrite(LED_BUILTIN, HIGH);
     delay(10);
-}
-
-void blinkfun() {
-    blink_flag = 1;
-}
-
-bool/*type added because ternary op was expecting to return value*/ check_and_publish(const char *Topic, const char *Message, bool Persistance) {
-
-    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
-        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
-    return 0;//See block comment above -bool, '0' is a dummy Value.
-}
-
-bool EEPROM_write(int value_to_be_written) {
-
-    if(EEPROM.read(0) == value_to_be_written)
-        return true;
-    else {
-        for(int i = 0; i < 5; i++) {
-            EEPROM.write(0, value_to_be_written);
-            if(EEPROM.commit()){
-                EEPROM.end();
-                return true;
-            }
-            EEPROM.end();
-            delay(10);
-        }
-    }
-    return false;
-}
-
-void setup() {
-
-    blink_flag = 0;
-    motor_state = 0;
-    solartimer_flag = 0;
-    sensor_malfunction = 0;
-    sensorStatusFlag = 1;
-    lastOffMessage_millis = 0;
-    onTimerFlag = 0;
-    EEPROM_Write_Flag = 0;
-
-    pinMode(SENSOR1, INPUT);
-    pinMode(SENSOR2, INPUT);
-    pinMode(SENSOR3, INPUT);
-    pinMode(EEPROM_INIT_PIN, INPUT);
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
-
-    setupWiFi();
-    EEPROM.begin(10);
-
-    client.setServer(host_name, 1883);
-    client.setCallback(callback);
-    connectMQTT();
-
-    if(digitalRead(EEPROM_INIT_PIN)) {
-        EEPROM_Value_To_Write = 0;
-        EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
-    }
-
-    if(EEPROM.read(0)) {
-        check_and_publish(TOPIC_SensorMalfunction, ON, 1);
-        sensor_malfunction = 1;
-    }
-    else {
-        check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
-    }
-
-    for(int i=0; i<=10; i++){
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(500);
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(500);
-    }
-
-    BlinkLED.attach(5, blinkfun);
-
 }
 
 void connectMQTT() {
     if(WiFi.status() != WL_CONNECTED)
         setupWiFi();
-    
+
     while (!client.connected()) {
         String clientID = "BCterrace-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
@@ -204,6 +127,13 @@ void connectMQTT() {
             delay(80);
         }
     }
+}
+
+bool check_and_publish(const char *Topic, const char *Message, bool Persistance) {/*Return type added because ternary op was expecting to return value*/
+
+    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
+        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
+    return 0;//See block comment above -bool, '0' is a dummy Value.
 }
 
 void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
@@ -270,8 +200,79 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         }
 }
 
+void blinkfun() {
+    blink_flag = 1;
+}
+
+bool EEPROM_write(int value_to_be_written) {
+
+    if(EEPROM.read(0) == value_to_be_written)
+        return true;
+    else {
+        for(int i = 0; i < 5; i++) {
+            EEPROM.write(0, value_to_be_written);
+            if(EEPROM.commit()){
+                EEPROM.end();
+                return true;
+            }
+            EEPROM.end();
+            delay(10);
+        }
+    }
+    return false;
+}
+
 void resetVar() {
     solartimer_flag = 1;
+}
+
+void setup() {
+
+    blink_flag = 0;
+    motor_state = 0;
+    solartimer_flag = 0;
+    sensor_malfunction = 0;
+    sensorStatusFlag = 1;
+    lastOffMessage_millis = 0;
+    onTimerFlag = 0;
+    EEPROM_Write_Flag = 0;
+
+    pinMode(SENSOR1, INPUT);
+    pinMode(SENSOR2, INPUT);
+    pinMode(SENSOR3, INPUT);
+    pinMode(EEPROM_INIT_PIN, INPUT);
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
+
+    setupWiFi();
+    EEPROM.begin(10);
+
+    client.setServer(host_name, 1883);
+    client.setCallback(callback);
+    connectMQTT();
+
+    if(digitalRead(EEPROM_INIT_PIN)) {
+        EEPROM_Value_To_Write = 0;
+        EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+    }
+
+    if(EEPROM.read(0)) {
+        check_and_publish(TOPIC_SensorMalfunction, ON, 1);
+        sensor_malfunction = 1;
+    }
+    else {
+        check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
+    }
+
+    for(int i=0; i<=10; i++){
+        digitalWrite(LED_BUILTIN, LOW);
+        delay(500);
+        digitalWrite(LED_BUILTIN, HIGH);
+        delay(500);
+    }
+
+    BlinkLED.attach(5, blinkfun);
+
 }
 
 void loop() {
@@ -344,10 +345,11 @@ void loop() {
             //Use timer to turn on
             check_and_publish(TOPIC_MotorChange, ON_WITH_TIMER, 0);
             onTimerFlag = 1;
-            if(!motor_state) {
+            // if(!motor_state) { 
                 motor_state = 1;
+                timer_to_reset.detach(); 
                 timer_to_reset.once(timer_solar_seconds, resetVar);
-            }
+            // } 
         }
 
         else if (s1 && !s2 && s3) {
