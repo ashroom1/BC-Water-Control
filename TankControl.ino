@@ -28,7 +28,7 @@
 
 const char *ssid = "likith12345";
 const char *password = "*druthi#";
-const char *host_name = "192.168.0.106";
+const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
@@ -152,7 +152,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
 
     if(!strcmp(msgTopic, TOPIC_SensorMalfunction)) {
-        if(!strcmp(msgTopic, ON)) {
+        if(!strcmp(message, ON)) {
             EEPROM_Value_To_Write = 1;
             EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
 
