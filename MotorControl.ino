@@ -25,7 +25,7 @@
 
 const char *ssid = "likith12345";
 const char *password = "*druthi#";
-const char *host_name = "192.168.0.106";
+const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
 const char *TOPIC_GroundResponse = "GroundResponse";    //For broker to know if Motor board is working.
@@ -227,7 +227,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         if(!strcmp(message, ON_WITH_TIMER)) {
             if(!motor_state) {
                 if (on_solar_illegal)       
-                    client.publish(TOPIC_SensorMalfunction, ON);
+                    check_and_publish(TOPIC_SensorMalfunction, ON, 1);
                 else {
                     turn_on_motor();
                     pureTimer_flag = 1;
