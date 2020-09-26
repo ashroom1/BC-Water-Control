@@ -48,9 +48,10 @@ bool waterTimer_flag;   //Water Timer interrupt
 bool pureTimer_flag;    //True when solar timer enabled
 bool motor_state;
 bool manualEnable;
+bool manualEnableIgnore;    //True during transition from manual to auto which avoids immediate motor toggle
 bool manual_state;
 bool tank_responsive;
-bool on_solar_illegal;      
+bool on_solar_illegal;
 int no_response_count = 0;
 
 unsigned long lastTankResponse = 4294967294;
@@ -59,7 +60,8 @@ Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
 Ticker BlinkLED;
 Ticker water_timer;
-Ticker make_solar_legal;    
+Ticker make_solar_legal;
+Ticker Ticker_manualEnableIgnore;
 WiFiClient wclient;
 PubSubClient client(wclient);
 
@@ -67,6 +69,7 @@ const float timer_pure_seconds = 5;     //Ideal sensor position - 35% of solar t
 const float timer_s1s3 = 10;
 const float timer_s1 = 15;
 const float timer_s3 = 20;
+const float timer_manualEnableIgnore = 10;      //Don't change. Delay for transition from manual to auto
 
 /*
  *(1) --Manual Override-> "break;" in setupWiFi & connectMQTT to be addressed.--
@@ -117,8 +120,9 @@ void check_manual() {
         {
             motor_state = 0;
             digitalWrite(Motor, LOW);
+            manualEnableIgnore = 1;
+            Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnorefun);
         }
-
     }
 }
 
@@ -139,13 +143,13 @@ void turn_off_motor() {
 }
 
 void setupWiFi() {
-  
+
     digitalWrite(LED_BUILTIN, LOW);     //LED always ON
-    
+
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password); 
-    
-    while(  (WiFi.status() != WL_CONNECTED)) {
+    WiFi.begin(ssid, password);
+
+    while((WiFi.status() != WL_CONNECTED)) {
         delay(200);
         check_manual();
     }
@@ -160,7 +164,7 @@ void connectMQTT() {
 
         if(WiFi.status() != WL_CONNECTED)
             setupWiFi();
-          
+
         check_manual();
 
         String clientID = "BCground-";
@@ -215,7 +219,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             ESP.deepSleep(0);
         }
 
-    if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive && !manualEnable) {
+    if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive && !manualEnable && !manualEnableIgnore) {
 
         if(!strcmp(message, OFF)) {
             if(motor_state) {
@@ -226,7 +230,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
         if(!strcmp(message, ON_WITH_TIMER)) {
             if(!motor_state) {
-                if (on_solar_illegal)       
+                if (on_solar_illegal)
                     check_and_publish(TOPIC_SensorMalfunction, ON, 1);
                 else {
                     turn_on_motor();
@@ -276,9 +280,14 @@ void pingNow() {
     pingNow_flag = 1;
 }
 
-void make_solar_legal_fun()     
+void make_solar_legal_fun()
 {
     on_solar_illegal = 0;
+}
+
+void manualEnableIgnoreFun()
+{
+    manualEnableIgnore = 0;
 }
 
 //Program starts here
@@ -289,7 +298,7 @@ void setup() {
 
     //MQTT Connect Timeout Decreased from 15 seconds to 5 seconds
     // client.setSocketTimeout(5);
-    
+
     motor_state = 0;
     tank_responsive = 1;
     blink_flag = 0;
@@ -298,12 +307,20 @@ void setup() {
     waterTimer_flag = 0;
     pureTimer_flag = 0;
     on_solar_illegal = 0;
+    manualEnableIgnore = 0;
 
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
+
+    //Redundant To be checked if Off message is require at Start
+    manualEnable = digitalRead(ManualOverride);
+    if(!manualEnable)
+        turn_off_motor();
+
+
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
@@ -325,11 +342,6 @@ void setup() {
         delay(500);
     }
 
-    //Redundant To be checked if Off message is require at Start
-    manualEnable = digitalRead(ManualOverride);
-    if(!manualEnable)
-        turn_off_motor();
-
     ping_tank.attach(PING_TANK_INTERVAL, pingNow);
     BlinkLED.attach(5, blinkfun);
 }
@@ -347,10 +359,11 @@ void loop() {
     if(WiFi.status() != WL_CONNECTED)
         setupWiFi();
 
-    if(WiFi.status() != WL_CONNECTED) {        //Redundant "if" statement needed. Because we need to turn ON the LED only if Wifi is not connected.
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(10);
-    }
+//    Redundant: LED turned ON inside setupWiFi()
+//    if(WiFi.status() != WL_CONNECTED) {        //Redundant "if" statement needed. Because we need to turn ON the LED only if Wifi is not connected.
+//        digitalWrite(LED_BUILTIN, LOW);
+//        delay(10);
+//    }
 
     if(!client.connected() && (WiFi.status() == WL_CONNECTED))   //Make sure MQTT is connected
         connectMQTT();
@@ -378,7 +391,7 @@ void loop() {
         pingNow_flag = 0;
     }
 
-    bool manualEnablePrev = manualEnable;           //Move up below blink
+    bool manualEnablePrev = manualEnable;
     manualEnable = digitalRead(ManualOverride);
 
     if(waterTimer_flag && !manualEnable/*Just to make sure (reliability), not actually needed*/) {
@@ -388,8 +401,8 @@ void loop() {
         waterTimer_flag = 0;
 
         if(pureTimer_flag) {
-            on_solar_illegal = 1;           
-            make_solar_legal.attach(SOLAR_ILLEGAL_WAITTIME_SECONDS, make_solar_legal_fun);   
+            on_solar_illegal = 1;
+            make_solar_legal.attach(SOLAR_ILLEGAL_WAITTIME_SECONDS, make_solar_legal_fun);
             pureTimer_flag = 0;
         }
         else {
@@ -416,8 +429,11 @@ void loop() {
     }
     else {
 
-        if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
+        if(manualEnablePrev && !manualEnable && motor_state) {       //Turn off motor when Manual override is turned off while motor is ON.
             turn_off_motor();
+            manualEnableIgnore = 1;
+            Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
+        }
 
         check_and_publish(TOPIC_ManualOverride, OFF, 0);
 
