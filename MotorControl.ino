@@ -38,6 +38,7 @@ const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge";    //
 const char *TOPIC_RequestBoardResetCount = "RequestBoardResetCount";
 const char *TOPIC_GroundResetCount = "GroundResetCount";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
+const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
 
 
@@ -52,6 +53,7 @@ bool manualEnableIgnore;    //True during transition from manual to auto which a
 bool manual_state;
 bool tank_responsive;
 bool on_solar_illegal;
+bool sensor_malfunction;
 int no_response_count = 0;
 
 unsigned long lastTankResponse = 4294967294;
@@ -65,11 +67,11 @@ Ticker Ticker_manualEnableIgnore;
 WiFiClient wclient;
 PubSubClient client(wclient);
 
-const float timer_pure_seconds = 5;     //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
-const float timer_s1s3 = 10;
-const float timer_s1 = 15;
-const float timer_s3 = 20;
-const float timer_manualEnableIgnore = 10;      //Don't change. Delay for transition from manual to auto
+const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0 //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
+const float timer_s1s3 = 28*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0
+const float timer_s1 = 20*60;           //Sensor states- MainOVF=0, MainMid=0 & Solar=1
+const float timer_s3 = 10*60;          //Sensor states- MainOVF=0, MainMid=1 & Solar=0
+const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition from manual to auto
 
 /*
  *(1) --Manual Override-> "break;" in setupWiFi & connectMQTT to be addressed.--
@@ -121,7 +123,7 @@ void check_manual() {
             motor_state = 0;
             digitalWrite(Motor, LOW);
             manualEnableIgnore = 1;
-            Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnorefun);
+            Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
         }
     }
 }
@@ -175,6 +177,8 @@ void connectMQTT() {
             client.subscribe(TOPIC_SysKill);
             client.subscribe(TOPIC_MotorChange);
             client.subscribe(TOPIC_PingGround);
+            client.subscribe(TOPIC_SensorMalfunction);
+            client.subscribe(TOPIC_SensorMalfunctionReset);
         }
         else {
             digitalWrite(LED_BUILTIN, LOW);
@@ -203,9 +207,17 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     memcpy(message, (char *) msgPayload, msgLength);
     message[msgLength] = '\0';
 
+    if(!strcmp(msgTopic, TOPIC_SensorMalfunction))
+        if(!strcmp(message, ON))
+            sensor_malfunction = 1;
+
     if(!strcmp(msgTopic, TOPIC_TankResponse))
         if(!strcmp(message, ON))
             lastTankResponse = millis();
+
+    if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
+        if(!strcmp(message, ON))
+            sensor_malfunction = 0;
 
     if(!strcmp(msgTopic, TOPIC_PingGround))
         if(!strcmp(message, ON))
@@ -219,7 +231,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             ESP.deepSleep(0);
         }
 
-    if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive && !manualEnable && !manualEnableIgnore) {
+    if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
 
         if(!strcmp(message, OFF)) {
             if(motor_state) {
@@ -230,8 +242,10 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
         if(!strcmp(message, ON_WITH_TIMER)) {
             if(!motor_state) {
-                if (on_solar_illegal)
+                if (on_solar_illegal) {
+                    sensor_malfunction = 1;
                     check_and_publish(TOPIC_SensorMalfunction, ON, 1);
+                }
                 else {
                     turn_on_motor();
                     pureTimer_flag = 1;
@@ -308,6 +322,7 @@ void setup() {
     pureTimer_flag = 0;
     on_solar_illegal = 0;
     manualEnableIgnore = 0;
+    sensor_malfunction = 0;
 
 
     pinMode(LED_BUILTIN, OUTPUT);
@@ -395,6 +410,10 @@ void loop() {
     manualEnable = digitalRead(ManualOverride);
 
     if(waterTimer_flag && !manualEnable/*Just to make sure (reliability), not actually needed*/) {
+
+        if(!pureTimer_flag)
+            sensor_malfunction = 1;
+
         if(motor_state)
             turn_off_motor();
 
