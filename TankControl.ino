@@ -70,6 +70,39 @@ unsigned long lastOffMessage_millis;
  * *********DONOT DELETE ANY CODE IN THE PROGRAM Without thorough CHECK*********
  */
 
+/* IMPORTANT NOTE:
+Issue: MotorStatus "OFF"(unintended) message was obtained inbetween "Ons1" messages
+Temporary Fix: Follow steps mentioned here for clearing "SensorMalfunction"
+Permanent Fix: Will be fixed in Ver.02 of software.
+Ref.image: "SensorMalfunction_Persistent-OFFmsg_error"
+
+Status of board when the fix was found
+{
+    1. Current State: 
+    D7(S3 Solar  ) - 1
+    D6(S2 MainOVF) - 0
+    D5(S1 MainMid) - 0
+
+    D1(EEPROM_RST) - 1
+
+    2. Previous State:
+    SensorMalfunction- ON
+}
+
+Steps to clear SensorMalfunction:
+    a. Fix the System (Hardware)
+    b. Run this "mosquitto_pub -h 192.168.0.105 -t SensorMalfunction -m OFF -r -d"
+       command to fix "SensorMalfunction" (Read Story Number 02 below).
+    c. Set EEPROM_init Pin to High (D1(EEPROM_RST) - 1)
+    d. RESET the Hardware
+
+Story Number 02:
+    Once upon a time in broker, 
+    the persistant "ON" message (of "SensorMalfunction") previously stored in the broker,
+    was the first thing to be received in the CallBack, 
+    which caused it to send one "OFF" message which was a problem.
+*/
+
 bool blink_flag;   //Blink Flag interrupt
 bool motor_state;   //Current state of the motor
 bool solartimer_flag;      //True indicates that the motor is on a pure timer
@@ -254,15 +287,19 @@ void setup() {
     if(digitalRead(EEPROM_INIT_PIN)) {
         EEPROM_Value_To_Write = 0;
         EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+        check_and_publish(TOPIC_SensorMalfunction, OFF, 1); //This will handle EEPROM fail case(write)
+        check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0); //This will handle EEPROM fail case(write)
     }
-
-    if(EEPROM.read(0)) {
-        check_and_publish(TOPIC_SensorMalfunction, ON, 1);
-        sensor_malfunction = 1;
-    }
-    else {
-        check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
-    }
+    else  { //This will handle EEPROM fail case(write)
+        if(EEPROM.read(0)) {
+            check_and_publish(TOPIC_SensorMalfunction, ON, 1);
+            sensor_malfunction = 1;
+        }
+        else {
+            check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
+            check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0);//added due to Motor Program dependency -Backup message to be sent from RPi as well
+        }
+    } //This will handle EEPROM fail case(write)
 
     for(int i=0; i<=10; i++){
         digitalWrite(LED_BUILTIN, LOW);
