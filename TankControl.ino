@@ -41,7 +41,7 @@ const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge"; //To be checked Motor ON/OFF Condition- Toggle
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
-const int timer_solar_seconds = 6*60; //Enter Solar tank Overflow Timer value in seconds
+const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) Enter Solar tank Overflow Timer value in seconds
 // The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
 
 unsigned long lastOffMessage_millis;
