@@ -134,10 +134,14 @@ void setupWiFi() {
 }
 
 void connectMQTT() {
-    if(WiFi.status() != WL_CONNECTED)
-        setupWiFi();
-
-    while (!client.connected()) {
+// Commented- as it is added inside while loop below,         
+//     if(WiFi.status() != WL_CONNECTED)
+//         setupWiFi();
+    
+    while (!client.connected()){
+        if(WiFi.status() != WL_CONNECTED)
+            setupWiFi(); // Connect to Wi-Fi if it gets disconnected in b/w
+        
         String clientID = "BCterrace-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
@@ -276,7 +280,8 @@ void setup() {
     pinMode(EEPROM_INIT_PIN, INPUT);
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
-
+    
+    WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
     EEPROM.begin(10);
 
