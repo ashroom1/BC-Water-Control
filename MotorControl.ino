@@ -339,7 +339,8 @@ void setup() {
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
-
+        
+    WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
 
     client.setServer(host_name, 1883);
