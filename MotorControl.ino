@@ -117,14 +117,22 @@ void check_manual() {
         }
     }
     else {
-
-        if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
+        if (motor_state)  //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
         {
-            motor_state = 0;
+            motor_state = 0;            // [Bug(Ver1.0) Found during "MQTT/Wi-Fi Disconnect and Motor On" situations- Water Over flow (~~+10mins of excess)]
             digitalWrite(Motor, LOW);
+
+            waterTimer_flag = 0;    //See Above, bug fix: For Safety Reasons- Reset timer variables and detach timer
+            pureTimer_flag = 0;
+            water_timer.detach();
+                //Commented below Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
+                //         if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
+                //         {
+                //             motor_state = 0;         //Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect//Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect 
+                //             digitalWrite(Motor, LOW);
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
-        }
+                //         }
     }
 }
 
@@ -337,6 +345,7 @@ void setup() {
 
 
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
+    motor_state = 0; 
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
         
