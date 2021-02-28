@@ -133,6 +133,7 @@ void check_manual() {
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
                 //         }
+        }    
     }
 }
 
