@@ -38,7 +38,7 @@ const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";
 const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
-const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge"; //To be checked Motor ON/OFF Condition- Toggle
+const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge"; //If Ground RESET- Reset all timers and motor_state () in TOPIC_GroundResetAndAcknowledge
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 
 const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) Enter Solar tank Overflow Timer value in seconds
@@ -227,10 +227,10 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(msgTopic, TOPIC_GroundResetAndAcknowledge))
         if(!strcmp(message, ON))
         {
-            motor_state = 0;
+            motor_state = 0; //Check comment below
             solartimer_flag = 0;
             onTimerFlag = 0;
-            check_and_publish(TOPIC_MotorChange, OFF, 0);
+//            check_and_publish(TOPIC_MotorChange, OFF, 0); // Commented due to Toggle issue NEVER UNCOMMENT THIS- (This will be taken care in setup() of MOTOR when it gets RESET)
             lastOffMessage_millis = millis();
             timer_to_reset.detach();      //If motor was ON due to solar timer, we need to stop the ticker because the motor is now OFF.
             check_and_publish(TOPIC_GroundResetAndAcknowledge, ACK, 1);
