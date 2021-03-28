@@ -347,9 +347,9 @@ void loop() {
     s2prev = s2;
     s3prev = s3;
 
-    s1 = digitalRead(SENSOR1);
-    s2 = digitalRead(SENSOR2);
-    s3 = digitalRead(SENSOR3);
+    s1 = !digitalRead(SENSOR1);
+    s2 = !digitalRead(SENSOR2);
+    s3 = !digitalRead(SENSOR3);
 
     if(!sensor_malfunction) {     //If sensor malfunction, do nothing
 
