@@ -23,7 +23,7 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "likith12345";
+const char *ssid = "likith";
 const char *password = "*druthi#";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorChange = "MotorStatusChange";
@@ -54,6 +54,7 @@ bool manual_state;
 bool tank_responsive;
 bool on_solar_illegal;
 bool sensor_malfunction;
+bool wait_on_disconnect_to_turnoff;
 int no_response_count = 0;
 
 unsigned long lastTankResponse = 4294967294;
@@ -96,8 +97,16 @@ const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition 
 
 void check_manual() {
 
+    static unsigned long initial_time = 0;
+
     bool manualEnablePrev = manualEnable;           //Move up below blink
     manualEnable = digitalRead(ManualOverride);
+
+
+    if (!wait_on_disconnect_to_turnoff) {
+  wait_on_disconnect_to_turnoff = 1;
+  initial_time = millis();
+    }
 
     if(manualEnable) {
 
@@ -117,7 +126,7 @@ void check_manual() {
         }
     }
     else {
-        if (motor_state)  //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
+        if (motor_state && (millis() - initial_time) > Seconds(5))  //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
         {
             motor_state = 0;            // [Bug(Ver1.0) Found during "MQTT/Wi-Fi Disconnect and Motor On" situations- Water Over flow (~~+10mins of excess)]
             digitalWrite(Motor, LOW);
@@ -332,6 +341,7 @@ void setup() {
     on_solar_illegal = 0;
     manualEnableIgnore = 0;
     sensor_malfunction = 0;
+    wait_on_disconnect_to_turnoff = 0;
 
 
     pinMode(LED_BUILTIN, OUTPUT);
@@ -352,12 +362,15 @@ void setup() {
         
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
+    wait_on_disconnect_to_turnoff = 0;
 
     client.setServer(host_name, 1883);
     client.setCallback(callback);
 
-    if (WiFi.status() == WL_CONNECTED)
+    if (WiFi.status() == WL_CONNECTED) {
         connectMQTT();
+  wait_on_disconnect_to_turnoff = 0;
+    }
 
     check_and_publish(TOPIC_GroundResetAndAcknowledge, ON, 1);      //Be persistent
 
@@ -382,8 +395,10 @@ void loop() {
         blink_flag = 0;
     }
 
-    if(WiFi.status() != WL_CONNECTED)
+    if(WiFi.status() != WL_CONNECTED) {
         setupWiFi();
+  wait_on_disconnect_to_turnoff = 0;
+    }
 
 //    Redundant: LED turned ON inside setupWiFi()
 //    if(WiFi.status() != WL_CONNECTED) {        //Redundant "if" statement needed. Because we need to turn ON the LED only if Wifi is not connected.
@@ -391,8 +406,10 @@ void loop() {
 //        delay(10);
 //    }
 
-    if(!client.connected() && (WiFi.status() == WL_CONNECTED))   //Make sure MQTT is connected
+    if(!client.connected() && (WiFi.status() == WL_CONNECTED)) {  //Make sure MQTT is connected
         connectMQTT();
+  wait_on_disconnect_to_turnoff = 0;
+    }
 
     if(tankresponsefun_flag) {
 
