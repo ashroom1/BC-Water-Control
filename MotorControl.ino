@@ -68,10 +68,10 @@ Ticker Ticker_manualEnableIgnore;
 WiFiClient wclient;
 PubSubClient client(wclient);
 
-const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0 //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
-const float timer_s1s3 = 28*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0
-const float timer_s1 = 20*60;           //Sensor states- MainOVF=0, MainMid=0 & Solar=1
-const float timer_s3 = 7*60;          //Sensor states- MainOVF=0, MainMid=1 & Solar=0
+const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
+const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank) + 13min(To fill 60% of Solar Tank of 13min)
+const float timer_s1 = 34*60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34min = 26min(To fill 100% of Main Tank) + 8min(To fill 60% of Solar Tank of 13min)  
+const float timer_s3 = 7*60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0      
 const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition from manual to auto
 
 /*
