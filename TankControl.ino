@@ -419,15 +419,15 @@ void loop() {
         //Report changes to sensor values
         if (sensorStatusFlag){   //
             check_and_publish(TOPIC_MainTankMid, (s1 ? ON : OFF), 1);
-            check_and_publish(TOPIC_MainTankMid, (s2 ? ON : OFF), 1);
-            check_and_publish(TOPIC_MainTankMid, (s3 ? ON : OFF), 1);
+            check_and_publish(TOPIC_MainTankOVF, (s2 ? ON : OFF), 1);
+            check_and_publish(TOPIC_SolarTankMid, (s3 ? ON : OFF), 1);
             sensorStatusFlag = 0;
         }
 
         else {
             s1 ^ s1prev ? check_and_publish(TOPIC_MainTankMid, (s1 ? ON : OFF), 1) : 0;
-            s2 ^ s2prev ? check_and_publish(TOPIC_MainTankMid, (s2 ? ON : OFF), 1) : 0;
-            s3 ^ s3prev ? check_and_publish(TOPIC_MainTankMid, (s3 ? ON : OFF), 1) : 0;
+            s2 ^ s2prev ? check_and_publish(TOPIC_MainTankOVF, (s2 ? ON : OFF), 1) : 0;
+            s3 ^ s3prev ? check_and_publish(TOPIC_SolarTankMid, (s3 ? ON : OFF), 1) : 0;
         }
     }
 
