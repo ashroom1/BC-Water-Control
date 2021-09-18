@@ -149,17 +149,19 @@ void check_manual() {
 
 void turn_on_motor() {
 
-    motor_state = 1;
     digitalWrite(Motor, HIGH);
-    check_and_publish(TOPIC_CurrentMotorState, ON, 0);
+    if(!motor_state)        //Send only once when motor_state changes. Avoids message flooding
+        check_and_publish(TOPIC_CurrentMotorState, ON, 0);
+    motor_state = 1;
 
 }
 
 void turn_off_motor() {
 
-    motor_state = 0;
     digitalWrite(Motor, LOW);
-    check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
+    if(motor_state)         //Send only once when motor_state changes. Avoids message flooding
+        check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
+    motor_state = 0;
 
 }
 
