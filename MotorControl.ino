@@ -43,6 +43,7 @@ const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic messa
 
 
 bool blink_flag;   //Blink Flag interrupt
+bool CurrentMotorState_message_flag;  //interrupt to send frequent on/off messages
 bool tankresponsefun_flag;    //Tank ping response interrupt
 bool pingNow_flag;  //Tank ping interrupt
 bool waterTimer_flag;   //Water Timer interrupt
@@ -61,7 +62,7 @@ unsigned long lastTankResponse = 4294967294;
 unsigned long pingTime;
 Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
-Ticker BlinkLED;
+Ticker timer_5sec;
 Ticker water_timer;
 Ticker make_solar_legal;
 Ticker Ticker_manualEnableIgnore;
@@ -70,8 +71,8 @@ PubSubClient client(wclient);
 
 const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
 const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank) + 13min(To fill 60% of Solar Tank of 13min)
-const float timer_s1 = 34*60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34min = 26min(To fill 100% of Main Tank) + 8min(To fill 60% of Solar Tank of 13min)  
-const float timer_s3 = 7*60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0      
+const float timer_s1 = 34*60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34min = 26min(To fill 100% of Main Tank) + 8min(To fill 60% of Solar Tank of 13min)
+const float timer_s3 = 7*60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0
 const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition from manual to auto
 
 /*
@@ -137,12 +138,12 @@ void check_manual() {
                 //Commented below Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
                 //         if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
                 //         {
-                //             motor_state = 0;         //Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect//Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect 
+                //             motor_state = 0;         //Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect//Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
                 //             digitalWrite(Motor, LOW);
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
                 //         }
-        }    
+        }
     }
 }
 
@@ -296,8 +297,9 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 }
 
 //ISRs
-void blinkfun() {
+void timer_fun_5sec() {
     blink_flag = 1;
+    CurrentMotorState_message_flag = 1;
 }
 
 void waterTimer() {
@@ -334,6 +336,7 @@ void setup() {
     motor_state = 0;
     tank_responsive = 1;
     blink_flag = 0;
+    CurrentMotorState_message_flag = 0;
     tankresponsefun_flag = 0;
     pingNow_flag = 0;
     waterTimer_flag = 0;
@@ -356,10 +359,10 @@ void setup() {
 
 
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
-    motor_state = 0; 
+    motor_state = 0;
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
-        
+
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
     wait_on_disconnect_to_turnoff = 0;
@@ -382,7 +385,7 @@ void setup() {
     }
 
     ping_tank.attach(PING_TANK_INTERVAL, pingNow);
-    BlinkLED.attach(5, blinkfun);
+    timer_5sec.attach(5, timer_fun_5sec);
 }
 
 void loop() {
@@ -409,6 +412,11 @@ void loop() {
     if(!client.connected() && (WiFi.status() == WL_CONNECTED)) {  //Make sure MQTT is connected
         connectMQTT();
   wait_on_disconnect_to_turnoff = 0;
+    }
+
+    if (CurrentMotorState_message_flag) {   //Reapeated on/off message
+      check_and_publish(TOPIC_CurrentMotorState, motor_state ? ON : OFF, 0);
+      CurrentMotorState_message_flag = 0;
     }
 
     if(tankresponsefun_flag) {
