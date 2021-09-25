@@ -214,7 +214,7 @@ void connectMQTT() {
     }
 }
 
-void check_and_publish(const char *Topic, char *Message, bool Persistance) {
+void check_and_publish(const char *Topic, const char *Message, bool Persistance) {
 
     if((WiFi.status() == WL_CONNECTED) && (client.connected()))
         Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
