@@ -370,6 +370,7 @@ void setup() {
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
 
+    WiFi.hostname("NodeMCU Motor");
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
     wait_on_disconnect_to_turnoff = 0;
