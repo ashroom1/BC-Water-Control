@@ -1,6 +1,7 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <Ticker.h>
+#include <String.h>
 
 #define Seconds(s) s*1000
 #define Minutes(m) m*Seconds(60)
@@ -8,6 +9,7 @@
 #define SOLAR_ILLEGAL_WAITTIME_SECONDS 600      //Time to be elapsed before the next ON_WITH_TIMER message is expected.
 #define PING_TANK_INTERVAL 6                    //Ping the tank this often
 #define TANK_RESPONSE_WAITTIME (PING_TANK_INTERVAL-1) //Wait for this
+#define WIFI_INFO_FREQUENCY_SECONDS 10  //Enter values in multiples of 5
 
 #define Motor D5
 #define ManualOverride D6
@@ -40,6 +42,7 @@ const char *TOPIC_GroundResetCount = "GroundResetCount";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
+const char *TOPIC_WifiInfo = "WifiInfo";
 
 
 bool blink_flag;   //Blink Flag interrupt
@@ -57,6 +60,7 @@ bool on_solar_illegal;
 bool sensor_malfunction;
 bool wait_on_disconnect_to_turnoff;
 int no_response_count = 0;
+unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
 
 unsigned long lastTankResponse = 4294967294;
 unsigned long pingTime;
@@ -302,6 +306,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 void timer_fun_5sec() {
     blink_flag = 1;
     CurrentMotorState_message_flag = 1;
+    ++WifiInfo_flag;
 }
 
 void waterTimer() {
@@ -347,7 +352,7 @@ void setup() {
     manualEnableIgnore = 0;
     sensor_malfunction = 0;
     wait_on_disconnect_to_turnoff = 0;
-
+    WifiInfo_flag = 0;
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
@@ -398,6 +403,8 @@ void loop() {
         delay(500);
         digitalWrite(LED_BUILTIN, HIGH);
         blink_flag = 0;
+
+        
     }
 
     if(WiFi.status() != WL_CONNECTED) {
@@ -419,6 +426,17 @@ void loop() {
     if (CurrentMotorState_message_flag) {   //Reapeated on/off message
       check_and_publish(TOPIC_CurrentMotorState, motor_state ? ON : OFF, 0);
       CurrentMotorState_message_flag = 0;
+    }
+
+    static char Local_WifiData[110];
+    if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
+      uint8_t macAddr[6];
+      char *thislocalIP = (char *) &WiFi.localIP().v4();
+      uint8_t *bssid = WiFi.BSSID();
+      WiFi.macAddress(macAddr);
+      sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI());
+      check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
+      WifiInfo_flag = 0;
     }
 
     if(tankresponsefun_flag) {
