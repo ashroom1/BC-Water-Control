@@ -10,6 +10,7 @@
 #define PING_TANK_INTERVAL 6                    //Ping the tank this often
 #define TANK_RESPONSE_WAITTIME (PING_TANK_INTERVAL-1) //Wait for this
 #define WIFI_INFO_FREQUENCY_SECONDS 10  //Enter values in multiples of 5
+#define MANUAL_OVERRIDE_FREQUENCY_SECONDS 10  //Enter values in multiples of 5
 
 #define Motor D5
 #define ManualOverride D6
@@ -61,6 +62,7 @@ bool sensor_malfunction;
 bool wait_on_disconnect_to_turnoff;
 int no_response_count = 0;
 unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
+unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
 
 unsigned long lastTankResponse = 4294967294;
 unsigned long pingTime;
@@ -307,6 +309,7 @@ void timer_fun_5sec() {
     blink_flag = 1;
     CurrentMotorState_message_flag = 1;
     ++WifiInfo_flag;
+    ++ManualOverride_flag;
 }
 
 void waterTimer() {
@@ -353,6 +356,7 @@ void setup() {
     sensor_malfunction = 0;
     wait_on_disconnect_to_turnoff = 0;
     WifiInfo_flag = 0;
+    ManualOverride_flag = 0;
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
@@ -404,8 +408,6 @@ void loop() {
         delay(500);
         digitalWrite(LED_BUILTIN, HIGH);
         blink_flag = 0;
-
-        
     }
 
     if(WiFi.status() != WL_CONNECTED) {
@@ -494,8 +496,6 @@ void loop() {
         pureTimer_flag = 0;
         water_timer.detach();
 
-
-        check_and_publish(TOPIC_ManualOverride, ON, 0);
         manual_state = digitalRead(ManualControl);
 
         if(manual_state)
@@ -511,15 +511,18 @@ void loop() {
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
         }
 
-        check_and_publish(TOPIC_ManualOverride, OFF, 0);
-
         if(no_response_count > 2) { //Wait for 3 response failures
             tank_responsive = 0;
             turn_off_motor();
             water_timer.detach();   //Turn off Fail-safe Timer
         }
-
-        client.loop();
     }
+    
+    if (ManualOverride_flag >= MANUAL_OVERRIDE_FREQUENCY_SECONDS / 5) {
+        check_and_publish(TOPIC_ManualOverride, manualEnable ? ON : OFF, 0);
+        ManualOverride_flag = 0;
+    }
+
+    client.loop();
     delay(Seconds(0.05));
 }
