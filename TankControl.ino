@@ -117,7 +117,7 @@ WiFiClient wclient;
 PubSubClient client(wclient);
 
 Ticker timer_to_reset;
-Ticker BlinkLED;
+Ticker timer_5sec;
 
 void setupWiFi() {
 
@@ -237,7 +237,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         }
 }
 
-void blinkfun() {
+void timer_fun_5sec() {
     blink_flag = 1;
 }
 
@@ -313,7 +313,7 @@ void setup() {
         delay(500);
     }
 
-    BlinkLED.attach(5, blinkfun);
+    timer_5sec.attach(5, timer_fun_5sec);
 
 }
 
