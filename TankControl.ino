@@ -7,6 +7,7 @@
 #define MINUTES(m) m*SECONDS(60) //Currently not used
 #define OFF_MESSAGE_FREQ_MILLISEC SECONDS(5)
 #define MAX_MSG_LENGTH 25
+#define WIFI_INFO_FREQUENCY_SECONDS 10  //Enter values in multiples of 5
 
 //  Pin numbers of the sensor
 #define SENSOR1 D5
@@ -40,6 +41,7 @@ const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge"; //If Ground RESET- Reset all timers and motor_state () in TOPIC_GroundResetAndAcknowledge
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
+const char *TOPIC_WifiInfo = "WifiInfo";
 
 const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) Enter Solar tank Overflow Timer value in seconds
 // The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
@@ -112,12 +114,13 @@ bool sensorStatusFlag;  //Flag for sending status of all sensors for the first t
 bool onTimerFlag;
 bool EEPROM_Write_Flag;
 bool EEPROM_Value_To_Write;
+unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
 
 WiFiClient wclient;
 PubSubClient client(wclient);
 
 Ticker timer_to_reset;
-Ticker BlinkLED;
+Ticker timer_5sec;
 
 void setupWiFi() {
 
@@ -237,8 +240,9 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         }
 }
 
-void blinkfun() {
+void timer_fun_5sec() {
     blink_flag = 1;
+    ++WifiInfo_flag;
 }
 
 bool EEPROM_write(int value_to_be_written) {
@@ -273,6 +277,7 @@ void setup() {
     lastOffMessage_millis = 0;
     onTimerFlag = 0;
     EEPROM_Write_Flag = 0;
+    WifiInfo_flag = 0;
 
     pinMode(SENSOR1, INPUT);
     pinMode(SENSOR2, INPUT);
@@ -280,7 +285,8 @@ void setup() {
     pinMode(EEPROM_INIT_PIN, INPUT);
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
-    
+
+    WiFi.hostname("NodeMCU Tank");
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
     EEPROM.begin(10);
@@ -313,7 +319,7 @@ void setup() {
         delay(500);
     }
 
-    BlinkLED.attach(5, blinkfun);
+    timer_5sec.attach(5, timer_fun_5sec);
 
 }
 
@@ -341,6 +347,17 @@ void loop() {
         onTimerFlag = 0;
         check_and_publish(TOPIC_MotorChange, OFF, 0);
         lastOffMessage_millis = millis();
+    }
+
+    static char Local_WifiData[110];
+    if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
+      uint8_t macAddr[6];
+      char *thislocalIP = (char *) &WiFi.localIP().v4();
+      uint8_t *bssid = WiFi.BSSID();
+      WiFi.macAddress(macAddr);
+      sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI());
+      check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
+      WifiInfo_flag = 0;
     }
 
     s1prev = s1;
