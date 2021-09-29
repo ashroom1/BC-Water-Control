@@ -384,7 +384,7 @@ void loop() {
       resetCount <<= 4;
       resetCount |= (uint32_t) EEPROM.read(1);
 
-      sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
+      sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
       check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
       WifiInfo_flag = 0;
     }
