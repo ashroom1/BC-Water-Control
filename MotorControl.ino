@@ -2,6 +2,8 @@
 #include <ESP8266WiFi.h>
 #include <Ticker.h>
 #include <EEPROM.h>
+#include <ESP8266WebServer.h>
+#include <ElegantOTA.h>
 #include <String.h>
 
 #define Seconds(s) s*1000
@@ -29,6 +31,8 @@
 
 const char *ssid = "likith";
 const char *password = "*druthi#";
+const char *OTA_ssid = "admin";
+const char *OTA_password = "admin";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
@@ -76,6 +80,7 @@ Ticker make_solar_legal;
 Ticker Ticker_manualEnableIgnore;
 WiFiClient wclient;
 PubSubClient client(wclient);
+ESP8266WebServer server(80);
 
 const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
 const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank) + 13min(To fill 60% of Solar Tank of 13min)
@@ -388,6 +393,9 @@ void setup() {
     WiFi.hostname("NodeMCU Motor");
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
+    ElegantOTA.begin(&server, OTA_ssid, OTA_password);
+    server.begin();
+     
     wait_on_disconnect_to_turnoff = 0;
 
     client.setServer(host_name, 1883);
