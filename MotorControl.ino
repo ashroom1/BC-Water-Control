@@ -1,6 +1,7 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <Ticker.h>
+#include <EEPROM.h>
 #include <String.h>
 
 #define Seconds(s) s*1000
@@ -38,6 +39,7 @@ const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_ManualOverride = "ManualOverride";        //Periodic message
 const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";      //To be handled in broker.
 const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge";    //To know if motor control board is resetting often.
+const char *TOPIC_BoardResetCountReset = "BoardResetCountReset";
 const char *TOPIC_RequestBoardResetCount = "RequestBoardResetCount";
 const char *TOPIC_GroundResetCount = "GroundResetCount";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
@@ -251,12 +253,19 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             check_and_publish(TOPIC_GroundResponse, ON, 0);
 
     if(!strcmp(msgTopic, TOPIC_SysKill))
-        if(!strcmp(message, MOTOR) | !strcmp(message, ALL)) {
+        if(!strcmp(message, MOTOR) || !strcmp(message, ALL)) {
             if(motor_state)
                 turn_off_motor();
 
             ESP.deepSleep(0);
         }
+    
+    if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
+        if(!strcmp(message, ALL) || !strcmp(message, MOTOR)) {
+            EEPROM.write(1, 0);
+            EEPROM.write(2, 0);
+            EEPROM.write(3, 0);
+        }    
 
     if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
 
@@ -363,6 +372,8 @@ void setup() {
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
 
+    increaseResetCount();
+
     //Redundant To be checked if Off message is require at Start
     manualEnable = digitalRead(ManualOverride);
     if(!manualEnable)
@@ -398,6 +409,20 @@ void setup() {
 
     ping_tank.attach(PING_TANK_INTERVAL, pingNow);
     timer_5sec.attach(5, timer_fun_5sec);
+}
+
+void increaseResetCount() {
+    if (EEPROM.read(1) == 0xff && EEPROM.read(2) == 0xff) {
+        EEPROM.write(1, 0);
+        EEPROM.write(2, 0);
+        EEPROM.write(3, EEPROM.read(3) + 1);
+    }
+    else if (EEPROM.read(1) == 0xff) {
+        EEPROM.write(1, 0);
+        EEPROM.write(2, EEPROM.read(2) + 1);
+    }
+    else
+        EEPROM.write(1, EEPROM.read(1) + 1);
 }
 
 void loop() {
@@ -437,7 +462,15 @@ void loop() {
       char *thislocalIP = (char *) &WiFi.localIP().v4();
       uint8_t *bssid = WiFi.BSSID();
       WiFi.macAddress(macAddr);
-      sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI());
+
+      uint32_t resetCount = 0;
+      resetCount |= (uint32_t) EEPROM.read(3);
+      resetCount <<= 4;
+      resetCount |= (uint32_t) EEPROM.read(2);
+      resetCount <<= 4;
+      resetCount |= (uint32_t) EEPROM.read(1);
+
+      sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
       check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
       WifiInfo_flag = 0;
     }
