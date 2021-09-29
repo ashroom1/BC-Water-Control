@@ -256,7 +256,7 @@ bool EEPROM_write(int location, int value_to_be_written) {
         return true;
     else {
         for(int i = 0; i < 5; i++) {
-            EEPROM.write(0, value_to_be_written);
+            EEPROM.write(location, value_to_be_written);
             if(EEPROM.commit()){
                 EEPROM.end();
                 return true;
