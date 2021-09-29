@@ -2,6 +2,8 @@
 #include <ESP8266WiFi.h>
 #include <Ticker.h>
 #include <EEPROM.h>
+#include <ESP8266WebServer.h>
+#include <ElegantOTA.h>
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60) //Currently not used
@@ -29,6 +31,8 @@
 
 const char *ssid = "likith12345";
 const char *password = "*druthi#";
+const char *OTA_ssid = "admin";
+const char *OTA_password = "admin";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
@@ -119,6 +123,7 @@ unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value 
 
 WiFiClient wclient;
 PubSubClient client(wclient);
+ESP8266WebServer server(80);
 
 Ticker timer_to_reset;
 Ticker timer_5sec;
@@ -133,6 +138,7 @@ void setupWiFi() {
     while(WiFi.status() != WL_CONNECTED)
         delay(200);
 
+    ElegantOTA.begin(&server, "username", "password");
     digitalWrite(LED_BUILTIN, HIGH);
     delay(10);
 }
@@ -311,6 +317,10 @@ void setup() {
     WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
+
+    ElegantOTA.begin(&server, OTA_ssid, OTA_password);
+    server.begin();
+
     EEPROM.begin(10);
 
     client.setServer(host_name, 1883);
