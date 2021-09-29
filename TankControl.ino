@@ -193,7 +193,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     if(!strcmp(msgTopic, TOPIC_SensorMalfunction)) {
         if(!strcmp(message, ON)) {
             EEPROM_Value_To_Write = 1;
-            EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+            EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
 
             //check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             motor_state = 0;
@@ -207,16 +207,16 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         if(!strcmp(message, ON)) {
             sensor_malfunction = 0;
             EEPROM_Value_To_Write = 0;
-            EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+            EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
             check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
             check_and_publish(TOPIC_MotorTimeoutWarning, OFF, 1);
         }
 
     if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
         if(!strcmp(message, ALL) || !strcmp(message, TANK)) {
-            EEPROM.write(1, 0);
-            EEPROM.write(2, 0);
-            EEPROM.write(3, 0);
+            EEPROM_write(1, 0);
+            EEPROM_write(2, 0);
+            EEPROM_write(3, 0);
         }    
 
     if(!strcmp(msgTopic, TOPIC_SysKill))
@@ -250,7 +250,7 @@ void timer_fun_5sec() {
     ++WifiInfo_flag;
 }
 
-bool EEPROM_write(int value_to_be_written) {
+bool EEPROM_write(int location, int value_to_be_written) {
 
     if(EEPROM.read(0) == value_to_be_written)
         return true;
@@ -274,16 +274,16 @@ void resetVar() {
 
 void increaseResetCount() {
     if (EEPROM.read(1) == 0xff && EEPROM.read(2) == 0xff) {
-        EEPROM.write(1, 0);
-        EEPROM.write(2, 0);
-        EEPROM.write(3, EEPROM.read(3) + 1);
+        EEPROM_write(1, 0);
+        EEPROM_write(2, 0);
+        EEPROM_write(3, EEPROM.read(3) + 1);
     }
     else if (EEPROM.read(1) == 0xff) {
-        EEPROM.write(1, 0);
-        EEPROM.write(2, EEPROM.read(2) + 1);
+        EEPROM_write(1, 0);
+        EEPROM_write(2, EEPROM.read(2) + 1);
     }
     else
-        EEPROM.write(1, EEPROM.read(1) + 1);
+        EEPROM_write(1, EEPROM.read(1) + 1);
 }
 
 void setup() {
@@ -308,6 +308,7 @@ void setup() {
     increaseResetCount();
 
     WiFi.hostname("NodeMCU Tank");
+    WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
     EEPROM.begin(10);
@@ -318,7 +319,7 @@ void setup() {
 
     if(digitalRead(EEPROM_INIT_PIN)) {
         EEPROM_Value_To_Write = 0;
-        EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+        EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
         check_and_publish(TOPIC_SensorMalfunction, OFF, 1); //This will handle EEPROM fail case(write)
         check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0); //This will handle EEPROM fail case(write)
     }
@@ -360,7 +361,7 @@ void loop() {
         connectMQTT();
 
     if(EEPROM_Write_Flag)
-        EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+        EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
 
     if(solartimer_flag) {
         motor_state = 0;
@@ -379,9 +380,9 @@ void loop() {
 
       uint32_t resetCount = 0;
       resetCount |= (uint32_t) EEPROM.read(3);
-      resetCount <<= 4;
+      resetCount <<= 8;
       resetCount |= (uint32_t) EEPROM.read(2);
-      resetCount <<= 4;
+      resetCount <<= 8;
       resetCount |= (uint32_t) EEPROM.read(1);
 
       sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
@@ -420,7 +421,7 @@ void loop() {
             //Sensor malfunction
 
             EEPROM_Value_To_Write = 1;
-            EEPROM_Write_Flag = !EEPROM_write(EEPROM_Value_To_Write);
+            EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
 
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             motor_state = 0;
