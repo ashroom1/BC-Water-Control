@@ -138,7 +138,6 @@ void setupWiFi() {
     while(WiFi.status() != WL_CONNECTED)
         delay(200);
 
-    ElegantOTA.begin(&server, "username", "password");
     digitalWrite(LED_BUILTIN, HIGH);
     delay(10);
 }
