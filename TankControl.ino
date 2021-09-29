@@ -36,6 +36,7 @@ const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
 const char *TOPIC_MotorChange = "MotorStatusChange";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";
+const char *TOPIC_BoardResetCountReset = "BoardResetCountReset";
 const char *TOPIC_SysKill = "SysKill";
 const char *TOPIC_PingTank = "PingTank";
 const char *TOPIC_TankResponse = "TankResponse";
@@ -183,13 +184,11 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     memcpy(message, (char *) msgPayload, msgLength);
     message[msgLength] = '\0';
 
-
     if(!sensor_malfunction) {
         if(!strcmp(msgTopic, TOPIC_PingTank))
             if(!strcmp(message, STATUS))
                 check_and_publish(TOPIC_TankResponse, ON, 0);
     }
-
 
     if(!strcmp(msgTopic, TOPIC_SensorMalfunction)) {
         if(!strcmp(message, ON)) {
@@ -202,7 +201,6 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
             sensor_malfunction = 1;
         }
-
     }
 
     if(!strcmp(msgTopic, TOPIC_SensorMalfunctionReset))
@@ -213,6 +211,13 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
             check_and_publish(TOPIC_MotorTimeoutWarning, OFF, 1);
         }
+
+    if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
+        if(!strcmp(message, ALL)) {
+            EEPROM.write(1, 0);
+            EEPROM.write(2, 0);
+            EEPROM.write(3, 0);
+        }    
 
     if(!strcmp(msgTopic, TOPIC_SysKill))
         if(!strcmp(message, TANK) || !strcmp(message, ALL))
@@ -267,6 +272,20 @@ void resetVar() {
     solartimer_flag = 1;
 }
 
+void increaseResetCount() {
+    if (EEPROM.read(1) == 0xff && EEPROM.read(2) == 0xff) {
+        EEPROM.write(1, 0);
+        EEPROM.write(2, 0);
+        EEPROM.write(3, EEPROM.read(3) + 1);
+    }
+    else if (EEPROM.read(1) == 0xff) {
+        EEPROM.write(1, 0);
+        EEPROM.write(2, EEPROM.read(2) + 1);
+    }
+    else
+        EEPROM.write(1, EEPROM.read(1) + 1);
+}
+
 void setup() {
 
     blink_flag = 0;
@@ -285,6 +304,8 @@ void setup() {
     pinMode(EEPROM_INIT_PIN, INPUT);
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
+
+    increaseResetCount();
 
     WiFi.hostname("NodeMCU Tank");
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
@@ -355,7 +376,15 @@ void loop() {
       char *thislocalIP = (char *) &WiFi.localIP().v4();
       uint8_t *bssid = WiFi.BSSID();
       WiFi.macAddress(macAddr);
-      sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI());
+
+      uint32_t resetCount = 0;
+      resetCount |= (uint32_t) EEPROM.read(3);
+      resetCount <<= 4;
+      resetCount |= (uint32_t) EEPROM.read(2);
+      resetCount <<= 4;
+      resetCount |= (uint32_t) EEPROM.read(1);
+
+      sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
       check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
       WifiInfo_flag = 0;
     }
