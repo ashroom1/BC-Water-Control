@@ -252,7 +252,7 @@ void timer_fun_5sec() {
 
 bool EEPROM_write(int location, int value_to_be_written) {
 
-    if(EEPROM.read(0) == value_to_be_written)
+    if(EEPROM.read(location) == value_to_be_written)
         return true;
     else {
         for(int i = 0; i < 5; i++) {
