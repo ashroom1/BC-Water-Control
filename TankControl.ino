@@ -213,7 +213,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         }
 
     if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
-        if(!strcmp(message, ALL) | !strcmp(message, TANK)) {
+        if(!strcmp(message, ALL) || !strcmp(message, TANK)) {
             EEPROM.write(1, 0);
             EEPROM.write(2, 0);
             EEPROM.write(3, 0);
