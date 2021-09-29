@@ -253,7 +253,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             check_and_publish(TOPIC_GroundResponse, ON, 0);
 
     if(!strcmp(msgTopic, TOPIC_SysKill))
-        if(!strcmp(message, MOTOR) | !strcmp(message, ALL)) {
+        if(!strcmp(message, MOTOR) || !strcmp(message, ALL)) {
             if(motor_state)
                 turn_off_motor();
 
@@ -261,7 +261,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         }
     
     if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
-        if(!strcmp(message, ALL) | !strcmp(message, MOTOR)) {
+        if(!strcmp(message, ALL) || !strcmp(message, MOTOR)) {
             EEPROM.write(1, 0);
             EEPROM.write(2, 0);
             EEPROM.write(3, 0);
