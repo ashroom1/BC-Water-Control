@@ -250,7 +250,7 @@ void timer_fun_5sec() {
     ++WifiInfo_flag;
 }
 
-uint8_t EEPROM_read(int location_read) {
+uint8_t EEPROM_read_with_delay(int location_read) {
   uint8_t temp = EEPROM.read(location_read);
   delay(10);
   return temp;
@@ -258,7 +258,7 @@ uint8_t EEPROM_read(int location_read) {
 
 bool EEPROM_write(int location, int value_to_be_written) {
 
-    if(EEPROM_read(location) == value_to_be_written)
+    if(EEPROM_read_with_delay(location) == value_to_be_written)
         return true;
     else {
         for(int i = 0; i < 5; i++) {
@@ -281,9 +281,9 @@ void resetVar() {
 
 void increaseResetCount() {
 
-  int temp_increaseResetCount01 = EEPROM_read(1);
-  int temp_increaseResetCount02 = EEPROM_read(2);
-  int temp_increaseResetCount03 = EEPROM_read(3);
+  int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
+  int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
+  int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
 
   if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
         EEPROM_write(1, 0);
@@ -336,7 +336,7 @@ void setup() {
         check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0); //This will handle EEPROM fail case(write)
     }
     else  { //This will handle EEPROM fail case(write)
-        if(EEPROM_read(0)) {
+        if(EEPROM_read_with_delay(0)) {
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             sensor_malfunction = 1;
         }
@@ -393,11 +393,11 @@ void loop() {
       uint32_t resetCount = 0;
 
       // Merging 3 bytes EEPROM data into 1 unsigned int
-      resetCount |= (uint32_t) EEPROM_read(3);
+      resetCount |= (uint32_t) EEPROM_read_with_delay(3);
       resetCount *= 256; // Left shift 8 bits
-      resetCount |= (uint32_t) EEPROM_read(2);
+      resetCount |= (uint32_t) EEPROM_read_with_delay(2);
       resetCount *= 256; // Left shift 8 bits
-      resetCount |= (uint32_t) EEPROM_read(1);
+      resetCount |= (uint32_t) EEPROM_read_with_delay(1);
 
       sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
       check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
