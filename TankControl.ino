@@ -155,6 +155,7 @@ void connectMQTT() {
             client.subscribe(TOPIC_PingTank);
             client.subscribe(TOPIC_SensorMalfunctionReset);
             client.subscribe(TOPIC_SensorMalfunction);
+            client.subscribe(TOPIC_BoardResetCountReset);
         }
         else {
             //Blink Fast for MQTT Status(Not Connected) indication
