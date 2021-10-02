@@ -27,8 +27,8 @@
 #define TANK "TANK"
 
 
-const char *ssid = "likith12345";
-const char *password = "*druthi#";
+const char *ssid = "ENTER SSID";
+const char *password = "ENTER PASSWORD";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
@@ -250,19 +250,26 @@ void timer_fun_5sec() {
     ++WifiInfo_flag;
 }
 
+uint8_t EEPROM_read(int location_read) {
+  uint8_t temp = EEPROM.read(location_read);
+  delay(10);
+  return temp;
+}
+
 bool EEPROM_write(int location, int value_to_be_written) {
 
-    if(EEPROM.read(location) == value_to_be_written)
+    if(EEPROM_read(location) == value_to_be_written)
         return true;
     else {
         for(int i = 0; i < 5; i++) {
             EEPROM.write(location, value_to_be_written);
+            delay(100);
             if(EEPROM.commit()){
-                EEPROM.end();
+//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
                 return true;
             }
-            EEPROM.end();
-            delay(10);
+//            EEPROM.end();
+//            delay(10);
         }
     }
     return false;
@@ -273,17 +280,22 @@ void resetVar() {
 }
 
 void increaseResetCount() {
-    if (EEPROM.read(1) == 0xff && EEPROM.read(2) == 0xff) {
+
+  int temp_increaseResetCount01 = EEPROM_read(1);
+  int temp_increaseResetCount02 = EEPROM_read(2);
+  int temp_increaseResetCount03 = EEPROM_read(3);
+
+  if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
         EEPROM_write(1, 0);
         EEPROM_write(2, 0);
-        EEPROM_write(3, EEPROM.read(3) + 1);
+        EEPROM_write(3, temp_increaseResetCount03 + 1);
     }
-    else if (EEPROM.read(1) == 0xff) {
+    else if (temp_increaseResetCount01 == 0xff) {
         EEPROM_write(1, 0);
-        EEPROM_write(2, EEPROM.read(2) + 1);
+        EEPROM_write(2, temp_increaseResetCount02 + 1);
     }
     else
-        EEPROM_write(1, EEPROM.read(1) + 1);
+        EEPROM_write(1, temp_increaseResetCount01 + 1);
 }
 
 void setup() {
@@ -305,14 +317,14 @@ void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
 
-    increaseResetCount();
-
     WiFi.hostname("NodeMCU Tank");
     WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
     EEPROM.begin(10);
-
+    
+    increaseResetCount();
+    
     client.setServer(host_name, 1883);
     client.setCallback(callback);
     connectMQTT();
@@ -324,7 +336,7 @@ void setup() {
         check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0); //This will handle EEPROM fail case(write)
     }
     else  { //This will handle EEPROM fail case(write)
-        if(EEPROM.read(0)) {
+        if(EEPROM_read(0)) {
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             sensor_malfunction = 1;
         }
@@ -371,7 +383,7 @@ void loop() {
         lastOffMessage_millis = millis();
     }
 
-    static char Local_WifiData[110];
+    static char Local_WifiData[200];
     if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
       uint8_t macAddr[6];
       char *thislocalIP = (char *) &WiFi.localIP().v4();
@@ -379,11 +391,13 @@ void loop() {
       WiFi.macAddress(macAddr);
 
       uint32_t resetCount = 0;
-      resetCount |= (uint32_t) EEPROM.read(3);
-      resetCount <<= 8;
-      resetCount |= (uint32_t) EEPROM.read(2);
-      resetCount <<= 8;
-      resetCount |= (uint32_t) EEPROM.read(1);
+
+      // Merging 3 bytes EEPROM data into 1 unsigned int
+      resetCount |= (uint32_t) EEPROM_read(3);
+      resetCount *= 256; // Left shift 8 bits
+      resetCount |= (uint32_t) EEPROM_read(2);
+      resetCount *= 256; // Left shift 8 bits
+      resetCount |= (uint32_t) EEPROM_read(1);
 
       sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
       check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
