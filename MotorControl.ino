@@ -2,10 +2,9 @@
 #include <ESP8266WiFi.h>
 #include <Ticker.h>
 #include <EEPROM.h>
-#include <String.h>
 
-#define Seconds(s) s*1000
-#define Minutes(m) m*Seconds(60)
+#define SECONDS(s) s*1000
+#define MINUTES(m) m*SECONDS(60)
 #define MAX_MSG_LENGTH 25
 #define SOLAR_ILLEGAL_WAITTIME_SECONDS 600      //Time to be elapsed before the next ON_WITH_TIMER message is expected.
 #define PING_TANK_INTERVAL 6                    //Ping the tank this often
@@ -27,10 +26,10 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "likith";
-const char *password = "*druthi#";
+const char *ssid = "ENTER SSID";
+const char *password = "ENTER PASSWORD";
 const char *host_name = "192.168.0.105";
-const char *TOPIC_MotorChange = "MotorStatusChange";
+const char *TOPIC_MotorStatusChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
 const char *TOPIC_GroundResponse = "GroundResponse";    //For broker to know if Motor board is working.
 const char *TOPIC_SysKill = "SysKill";
@@ -40,8 +39,8 @@ const char *TOPIC_ManualOverride = "ManualOverride";        //Periodic message
 const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";      //To be handled in broker.
 const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge";    //To know if motor control board is resetting often.
 const char *TOPIC_BoardResetCountReset = "BoardResetCountReset";
-const char *TOPIC_RequestBoardResetCount = "RequestBoardResetCount";
-const char *TOPIC_GroundResetCount = "GroundResetCount";
+//const char *TOPIC_RequestBoardResetCount = "RequestBoardResetCount";
+//const char *TOPIC_GroundResetCount = "GroundResetCount";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
@@ -113,8 +112,8 @@ void check_manual() {
 
 
     if (!wait_on_disconnect_to_turnoff) {
-  wait_on_disconnect_to_turnoff = 1;
-  initial_time = millis();
+        wait_on_disconnect_to_turnoff = 1;
+        initial_time = millis();
     }
 
     if(manualEnable) {
@@ -125,32 +124,27 @@ void check_manual() {
 
         manual_state = digitalRead(ManualControl);
 
-        if(manual_state) {
-            motor_state = 1;
-            digitalWrite(Motor, HIGH);
-        }
-        else {
-            motor_state = 0;
-            digitalWrite(Motor, LOW);
-        }
+        if(manual_state)
+            turn_on_motor();
+        else
+            turn_off_motor();
     }
     else {
-        if (motor_state && (millis() - initial_time) > Seconds(5))  //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
+        if (motor_state && (millis() - initial_time) > SECONDS(5))  //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
         {
-            motor_state = 0;            // [Bug(Ver1.0) Found during "MQTT/Wi-Fi Disconnect and Motor On" situations- Water Over flow (~~+10mins of excess)]
-            digitalWrite(Motor, LOW);
+            turn_off_motor();            // [Bug(Ver1.0) Found during "MQTT/Wi-Fi Disconnect and Motor On" situations- Water Over flow (~~+10mins of excess)]
 
             waterTimer_flag = 0;    //See Above, bug fix: For Safety Reasons- Reset timer variables and detach timer
             pureTimer_flag = 0;
             water_timer.detach();
-                //Commented below Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
-                //         if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
-                //         {
-                //             motor_state = 0;         //Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect//Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
-                //             digitalWrite(Motor, LOW);
+            //Commented below Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
+            //         if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
+            //         {
+            //             motor_state = 0;         //Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect//Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
+            //             digitalWrite(Motor, LOW);
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
-                //         }
+            //         }
         }
     }
 }
@@ -204,10 +198,11 @@ void connectMQTT() {
         if(client.connect(clientID.c_str())){   //Subscribe to required topics
             client.subscribe(TOPIC_TankResponse);
             client.subscribe(TOPIC_SysKill);
-            client.subscribe(TOPIC_MotorChange);
+            client.subscribe(TOPIC_MotorStatusChange);
             client.subscribe(TOPIC_PingGround);
             client.subscribe(TOPIC_SensorMalfunction);
             client.subscribe(TOPIC_SensorMalfunctionReset);
+            client.subscribe(TOPIC_BoardResetCountReset);
         }
         else {
             digitalWrite(LED_BUILTIN, LOW);
@@ -259,15 +254,15 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
             ESP.deepSleep(0);
         }
-    
+
     if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
         if(!strcmp(message, ALL) || !strcmp(message, MOTOR)) {
-            EEPROM.write(1, 0);
-            EEPROM.write(2, 0);
-            EEPROM.write(3, 0);
-        }    
+            EEPROM_write(1, 0);
+            EEPROM_write(2, 0);
+            EEPROM_write(3, 0);
+        }
 
-    if(!strcmp(msgTopic, TOPIC_MotorChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
+    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
 
         if(!strcmp(message, OFF)) {
             if(motor_state) {
@@ -343,6 +338,50 @@ void manualEnableIgnoreFun()
     manualEnableIgnore = 0;
 }
 
+uint8_t EEPROM_read_with_delay(int location_read) {
+    uint8_t temp = EEPROM.read(location_read);
+    delay(10);
+    return temp;
+}
+
+bool EEPROM_write(int location, int value_to_be_written) {
+
+    if(EEPROM_read_with_delay(location) == value_to_be_written)
+        return true;
+    else {
+        for(int i = 0; i < 5; i++) {
+            EEPROM.write(location, value_to_be_written);
+            delay(100);
+            if(EEPROM.commit()){
+//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
+                return true;
+            }
+//            EEPROM.end();
+//            delay(10);
+        }
+    }
+    return false;
+}
+
+void increaseResetCount() {
+
+    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
+    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
+    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
+
+    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, 0);
+        EEPROM_write(3, temp_increaseResetCount03 + 1);
+    }
+    else if (temp_increaseResetCount01 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, temp_increaseResetCount02 + 1);
+    }
+    else
+        EEPROM_write(1, temp_increaseResetCount01 + 1);
+}
+
 //Program starts here
 void setup() {
     // put your setup code here, to run once:
@@ -372,8 +411,6 @@ void setup() {
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
 
-    increaseResetCount();
-
     //Redundant To be checked if Off message is require at Start
     manualEnable = digitalRead(ManualOverride);
     if(!manualEnable)
@@ -386,8 +423,13 @@ void setup() {
     delay(1000);
 
     WiFi.hostname("NodeMCU Motor");
+    WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
+    EEPROM.begin(10);
+
+    increaseResetCount();
+
     wait_on_disconnect_to_turnoff = 0;
 
     client.setServer(host_name, 1883);
@@ -395,7 +437,7 @@ void setup() {
 
     if (WiFi.status() == WL_CONNECTED) {
         connectMQTT();
-  wait_on_disconnect_to_turnoff = 0;
+        wait_on_disconnect_to_turnoff = 0;
     }
 
     check_and_publish(TOPIC_GroundResetAndAcknowledge, ON, 1);      //Be persistent
@@ -411,20 +453,6 @@ void setup() {
     timer_5sec.attach(5, timer_fun_5sec);
 }
 
-void increaseResetCount() {
-    if (EEPROM.read(1) == 0xff && EEPROM.read(2) == 0xff) {
-        EEPROM.write(1, 0);
-        EEPROM.write(2, 0);
-        EEPROM.write(3, EEPROM.read(3) + 1);
-    }
-    else if (EEPROM.read(1) == 0xff) {
-        EEPROM.write(1, 0);
-        EEPROM.write(2, EEPROM.read(2) + 1);
-    }
-    else
-        EEPROM.write(1, EEPROM.read(1) + 1);
-}
-
 void loop() {
     // put your main code here, to run repeatedly:
 
@@ -437,7 +465,7 @@ void loop() {
 
     if(WiFi.status() != WL_CONNECTED) {
         setupWiFi();
-  wait_on_disconnect_to_turnoff = 0;
+        wait_on_disconnect_to_turnoff = 0;
     }
 
 //    Redundant: LED turned ON inside setupWiFi()
@@ -448,38 +476,40 @@ void loop() {
 
     if(!client.connected() && (WiFi.status() == WL_CONNECTED)) {  //Make sure MQTT is connected
         connectMQTT();
-  wait_on_disconnect_to_turnoff = 0;
+        wait_on_disconnect_to_turnoff = 0;
     }
 
-    if (CurrentMotorState_message_flag) {   //Reapeated on/off message
-      check_and_publish(TOPIC_CurrentMotorState, motor_state ? ON : OFF, 0);
-      CurrentMotorState_message_flag = 0;
+    if (CurrentMotorState_message_flag) {   //Repeated on/off message
+        check_and_publish(TOPIC_CurrentMotorState, motor_state ? ON : OFF, 0);
+        CurrentMotorState_message_flag = 0;
     }
 
-    static char Local_WifiData[110];
+    static char Local_WifiData[200];
     if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
-      uint8_t macAddr[6];
-      char *thislocalIP = (char *) &WiFi.localIP().v4();
-      uint8_t *bssid = WiFi.BSSID();
-      WiFi.macAddress(macAddr);
+        uint8_t macAddr[6];
+        char *thislocalIP = (char *) &WiFi.localIP().v4();
+        uint8_t *bssid = WiFi.BSSID();
+        WiFi.macAddress(macAddr);
 
-      uint32_t resetCount = 0;
-      resetCount |= (uint32_t) EEPROM.read(3);
-      resetCount <<= 4;
-      resetCount |= (uint32_t) EEPROM.read(2);
-      resetCount <<= 4;
-      resetCount |= (uint32_t) EEPROM.read(1);
+        uint32_t resetCount = 0;
 
-      sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
-      check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
-      WifiInfo_flag = 0;
+        // Merging 3 bytes EEPROM data into 1 unsigned int
+        resetCount |= (uint32_t) EEPROM_read_with_delay(3);
+        resetCount *= 256; // Left shift 8 bits
+        resetCount |= (uint32_t) EEPROM_read_with_delay(2);
+        resetCount *= 256; // Left shift 8 bits
+        resetCount |= (uint32_t) EEPROM_read_with_delay(1);
+
+        sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
+        check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
+        WifiInfo_flag = 0;
     }
 
     if(tankresponsefun_flag) {
 
         unsigned long elapsed = lastTankResponse - pingTime;
-        if(abs(elapsed) < Minutes(48 * 60 /* 2 days */)) {       //Handle millis overflow
-            if(elapsed <= Seconds(TANK_RESPONSE_WAITTIME)) {
+        if(abs(elapsed) < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
+            if(elapsed <= SECONDS(TANK_RESPONSE_WAITTIME)) {
                 no_response_count = 0;
                 tank_responsive = 1;
             }
@@ -550,12 +580,12 @@ void loop() {
             water_timer.detach();   //Turn off Fail-safe Timer
         }
     }
-    
+
     if (ManualOverride_flag >= MANUAL_OVERRIDE_FREQUENCY_SECONDS / 5) {
         check_and_publish(TOPIC_ManualOverride, manualEnable ? ON : OFF, 0);
         ManualOverride_flag = 0;
     }
 
     client.loop();
-    delay(Seconds(0.05));
+    delay(SECONDS(0.05));
 }
