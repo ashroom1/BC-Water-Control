@@ -65,6 +65,8 @@ int no_response_count = 0;
 unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
 unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
 
+uint32_t current_reset_count;
+
 unsigned long lastTankResponse = 4294967294;
 unsigned long pingTime;
 Ticker ping_tank;
@@ -257,9 +259,26 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
     if(!strcmp(msgTopic, TOPIC_BoardResetCountReset))
         if(!strcmp(message, ALL) || !strcmp(message, MOTOR)) {
-            EEPROM_write(1, 0);
-            EEPROM_write(2, 0);
-            EEPROM_write(3, 0);
+            
+             ESP.wdtDisable(); 
+             /*
+              * Without this the board may reset. This is only a software watchdog reset.
+              * This is a good way to implement this because setting a flag in this callback 
+              * and checking it in the loop frequently is not a good idea because BoardResetCountReset
+              * is done very rarely.
+             */
+             EEPROM.write(1, 0);
+             EEPROM.write(2, 0);
+             EEPROM_write_and_commit(3, 0);
+
+             current_reset_count = 0;
+             current_reset_count |= (uint32_t) EEPROM_read_with_delay(3);
+             current_reset_count *= 256; // Left shift 8 bits
+             current_reset_count |= (uint32_t) EEPROM_read_with_delay(2);
+             current_reset_count *= 256; // Left shift 8 bits
+             current_reset_count |= (uint32_t) EEPROM_read_with_delay(1);
+
+             ESP.wdtEnable(1000);  // The value passed in is useless as of 02/10/2021
         }
 
     if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
@@ -344,7 +363,7 @@ uint8_t EEPROM_read_with_delay(int location_read) {
     return temp;
 }
 
-bool EEPROM_write(int location, int value_to_be_written) {
+bool EEPROM_write_and_commit(int location, int value_to_be_written) {
 
     if(EEPROM_read_with_delay(location) == value_to_be_written)
         return true;
@@ -365,21 +384,28 @@ bool EEPROM_write(int location, int value_to_be_written) {
 
 void increaseResetCount() {
 
-    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
-    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
-    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
+    uint8_t temp_increaseResetCount01 = EEPROM_read_with_delay(1);
+    uint8_t temp_increaseResetCount02 = EEPROM_read_with_delay(2);
+    uint8_t temp_increaseResetCount03 = EEPROM_read_with_delay(3);
 
     if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, 0);
-        EEPROM_write(3, temp_increaseResetCount03 + 1);
+        EEPROM.write(1, 0);
+        EEPROM.write(2, 0);
+        EEPROM_write_and_commit(3, temp_increaseResetCount03 + 1);
     }
     else if (temp_increaseResetCount01 == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, temp_increaseResetCount02 + 1);
+        EEPROM.write(1, 0);
+        EEPROM_write_and_commit(2, temp_increaseResetCount02 + 1);
     }
     else
-        EEPROM_write(1, temp_increaseResetCount01 + 1);
+        EEPROM_write_and_commit(1, temp_increaseResetCount01 + 1);
+
+    current_reset_count = 0;
+    current_reset_count |= (uint32_t) EEPROM_read_with_delay(3);
+    current_reset_count *= 256; // Left shift 8 bits
+    current_reset_count |= (uint32_t) EEPROM_read_with_delay(2);
+    current_reset_count *= 256; // Left shift 8 bits
+    current_reset_count |= (uint32_t) EEPROM_read_with_delay(1);
 }
 
 //Program starts here
@@ -491,16 +517,7 @@ void loop() {
         uint8_t *bssid = WiFi.BSSID();
         WiFi.macAddress(macAddr);
 
-        uint32_t resetCount = 0;
-
-        // Merging 3 bytes EEPROM data into 1 unsigned int
-        resetCount |= (uint32_t) EEPROM_read_with_delay(3);
-        resetCount *= 256; // Left shift 8 bits
-        resetCount |= (uint32_t) EEPROM_read_with_delay(2);
-        resetCount *= 256; // Left shift 8 bits
-        resetCount |= (uint32_t) EEPROM_read_with_delay(1);
-
-        sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
+        sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), current_reset_count);
         check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
         WifiInfo_flag = 0;
     }
