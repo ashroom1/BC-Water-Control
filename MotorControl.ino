@@ -525,7 +525,7 @@ void loop() {
     if(tankresponsefun_flag) {
 
         unsigned long elapsed = lastTankResponse - pingTime;
-        if(abs(elapsed) < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
+        if((elapsed) < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
             if(elapsed <= SECONDS(TANK_RESPONSE_WAITTIME)) {
                 no_response_count = 0;
                 tank_responsive = 1;
