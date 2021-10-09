@@ -29,7 +29,6 @@
 #define ACK "ACK"
 #define TANK "TANK"
 
-
 const char *ssid = "SSID";
 const char *password = "PASSWORD";
 const char *host_name = "192.168.0.105";
