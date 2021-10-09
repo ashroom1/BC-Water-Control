@@ -1,5 +1,8 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 #include <Ticker.h>
 #include <EEPROM.h>
 
@@ -26,9 +29,8 @@
 #define ACK "ACK"
 #define TANK "TANK"
 
-
-const char *ssid = "ENTER SSID";
-const char *password = "ENTER PASSWORD";
+const char *ssid = "SSID";
+const char *password = "PASSWORD";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
@@ -48,7 +50,6 @@ const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) En
 // The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
 
 unsigned long lastOffMessage_millis;
-
 
 /*
  * --Save sensor malfunction in EEPROM--
@@ -119,9 +120,70 @@ unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value 
 
 WiFiClient wclient;
 PubSubClient client(wclient);
+AsyncWebServer server(80);
 
 Ticker timer_to_reset;
 Ticker timer_5sec;
+
+void timer_fun_5sec() {
+    blink_flag = 1;
+    ++WifiInfo_flag;
+}
+
+uint8_t EEPROM_read_with_delay(int location_read) {
+    uint8_t temp = EEPROM.read(location_read);
+    delay(10);
+    return temp;
+}
+
+bool EEPROM_write(int location, int value_to_be_written) {
+
+    if(EEPROM_read_with_delay(location) == value_to_be_written)
+        return true;
+    else {
+        for(int i = 0; i < 5; i++) {
+            EEPROM.write(location, value_to_be_written);
+            delay(100);
+            if(EEPROM.commit()){
+//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
+                return true;
+            }
+//            EEPROM.end();
+//            delay(10);
+        }
+    }
+    return false;
+}
+
+void resetVar() {
+    solartimer_flag = 1;
+}
+
+void increaseResetCount() {
+
+    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
+    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
+    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
+
+    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, 0);
+        EEPROM_write(3, temp_increaseResetCount03 + 1);
+    }
+    else if (temp_increaseResetCount01 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, temp_increaseResetCount02 + 1);
+    }
+    else
+        EEPROM_write(1, temp_increaseResetCount01 + 1);
+}
+
+bool check_and_publish(const char *Topic, const char *Message, bool Persistance) {/*Return type added because ternary op was expecting to return value*/
+
+    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
+        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
+    return 0;//See block comment above -bool, '0' is a dummy Value.
+}
 
 void setupWiFi() {
 
@@ -169,13 +231,6 @@ void connectMQTT() {
             delay(80);
         }
     }
-}
-
-bool check_and_publish(const char *Topic, const char *Message, bool Persistance) {/*Return type added because ternary op was expecting to return value*/
-
-    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
-        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
-    return 0;//See block comment above -bool, '0' is a dummy Value.
 }
 
 void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
@@ -246,59 +301,6 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         }
 }
 
-void timer_fun_5sec() {
-    blink_flag = 1;
-    ++WifiInfo_flag;
-}
-
-uint8_t EEPROM_read_with_delay(int location_read) {
-    uint8_t temp = EEPROM.read(location_read);
-    delay(10);
-    return temp;
-}
-
-bool EEPROM_write(int location, int value_to_be_written) {
-
-    if(EEPROM_read_with_delay(location) == value_to_be_written)
-        return true;
-    else {
-        for(int i = 0; i < 5; i++) {
-            EEPROM.write(location, value_to_be_written);
-            delay(100);
-            if(EEPROM.commit()){
-//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
-                return true;
-            }
-//            EEPROM.end();
-//            delay(10);
-        }
-    }
-    return false;
-}
-
-void resetVar() {
-    solartimer_flag = 1;
-}
-
-void increaseResetCount() {
-
-    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
-    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
-    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
-
-    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, 0);
-        EEPROM_write(3, temp_increaseResetCount03 + 1);
-    }
-    else if (temp_increaseResetCount01 == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, temp_increaseResetCount02 + 1);
-    }
-    else
-        EEPROM_write(1, temp_increaseResetCount01 + 1);
-}
-
 void setup() {
 
     blink_flag = 0;
@@ -322,6 +324,10 @@ void setup() {
     WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
+    
+    AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+    server.begin();
+    
     EEPROM.begin(10);
 
     increaseResetCount();

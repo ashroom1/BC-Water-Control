@@ -1,5 +1,8 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 #include <Ticker.h>
 #include <EEPROM.h>
 
@@ -26,8 +29,8 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "ENTER SSID";
-const char *password = "ENTER PASSWORD";
+const char *ssid = "SSID";
+const char *password = "PASSWORD";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorStatusChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
@@ -75,6 +78,7 @@ Ticker make_solar_legal;
 Ticker Ticker_manualEnableIgnore;
 WiFiClient wclient;
 PubSubClient client(wclient);
+AsyncWebServer server(80);
 
 const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
 const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank) + 13min(To fill 60% of Solar Tank of 13min)
@@ -102,6 +106,105 @@ const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition 
  *(4) Ping tank more often when motor is ON
  *
 */
+
+void check_and_publish(const char *Topic, const char *Message, bool Persistance) {
+
+    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
+        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
+
+}
+
+//ISRs
+void timer_fun_5sec() {
+    blink_flag = 1;
+    CurrentMotorState_message_flag = 1;
+    ++WifiInfo_flag;
+    ++ManualOverride_flag;
+}
+
+void waterTimer() {
+    waterTimer_flag = 1;
+}
+
+void tankresponsefun() {
+    tankresponsefun_flag = 1;
+}
+
+void pingNow() {
+    pingNow_flag = 1;
+}
+
+void make_solar_legal_fun()
+{
+    on_solar_illegal = 0;
+}
+
+void manualEnableIgnoreFun()
+{
+    manualEnableIgnore = 0;
+}
+
+uint8_t EEPROM_read_with_delay(int location_read) {
+    uint8_t temp = EEPROM.read(location_read);
+    delay(10);
+    return temp;
+}
+
+bool EEPROM_write(int location, int value_to_be_written) {
+
+    if(EEPROM_read_with_delay(location) == value_to_be_written)
+        return true;
+    else {
+        for(int i = 0; i < 5; i++) {
+            EEPROM.write(location, value_to_be_written);
+            delay(100);
+            if(EEPROM.commit()){
+//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
+                return true;
+            }
+//            EEPROM.end();
+//            delay(10);
+        }
+    }
+    return false;
+}
+
+void increaseResetCount() {
+
+    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
+    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
+    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
+
+    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, 0);
+        EEPROM_write(3, temp_increaseResetCount03 + 1);
+    }
+    else if (temp_increaseResetCount01 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, temp_increaseResetCount02 + 1);
+    }
+    else
+        EEPROM_write(1, temp_increaseResetCount01 + 1);
+}
+
+void turn_on_motor() {
+
+    digitalWrite(Motor, HIGH);
+    if(!motor_state)        //Send only once when motor_state changes. Avoids message flooding
+        check_and_publish(TOPIC_CurrentMotorState, ON, 0);
+    motor_state = 1;
+
+}
+
+void turn_off_motor() {
+
+    digitalWrite(Motor, LOW);
+    if(motor_state)         //Send only once when motor_state changes. Avoids message flooding
+        check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
+    motor_state = 0;
+
+}
 
 void check_manual() {
 
@@ -147,24 +250,6 @@ void check_manual() {
             //         }
         }
     }
-}
-
-void turn_on_motor() {
-
-    digitalWrite(Motor, HIGH);
-    if(!motor_state)        //Send only once when motor_state changes. Avoids message flooding
-        check_and_publish(TOPIC_CurrentMotorState, ON, 0);
-    motor_state = 1;
-
-}
-
-void turn_off_motor() {
-
-    digitalWrite(Motor, LOW);
-    if(motor_state)         //Send only once when motor_state changes. Avoids message flooding
-        check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
-    motor_state = 0;
-
 }
 
 void setupWiFi() {
@@ -215,13 +300,6 @@ void connectMQTT() {
             delay(80);      //To make LED pattern consistent. There might be delay in the rest of the loop.
         }
     }
-}
-
-void check_and_publish(const char *Topic, const char *Message, bool Persistance) {
-
-    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
-        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
-
 }
 
 void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
@@ -308,80 +386,6 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
     }
 }
 
-//ISRs
-void timer_fun_5sec() {
-    blink_flag = 1;
-    CurrentMotorState_message_flag = 1;
-    ++WifiInfo_flag;
-    ++ManualOverride_flag;
-}
-
-void waterTimer() {
-    waterTimer_flag = 1;
-}
-
-void tankresponsefun() {
-    tankresponsefun_flag = 1;
-}
-
-void pingNow() {
-    pingNow_flag = 1;
-}
-
-void make_solar_legal_fun()
-{
-    on_solar_illegal = 0;
-}
-
-void manualEnableIgnoreFun()
-{
-    manualEnableIgnore = 0;
-}
-
-uint8_t EEPROM_read_with_delay(int location_read) {
-    uint8_t temp = EEPROM.read(location_read);
-    delay(10);
-    return temp;
-}
-
-bool EEPROM_write(int location, int value_to_be_written) {
-
-    if(EEPROM_read_with_delay(location) == value_to_be_written)
-        return true;
-    else {
-        for(int i = 0; i < 5; i++) {
-            EEPROM.write(location, value_to_be_written);
-            delay(100);
-            if(EEPROM.commit()){
-//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
-                return true;
-            }
-//            EEPROM.end();
-//            delay(10);
-        }
-    }
-    return false;
-}
-
-void increaseResetCount() {
-
-    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
-    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
-    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
-
-    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, 0);
-        EEPROM_write(3, temp_increaseResetCount03 + 1);
-    }
-    else if (temp_increaseResetCount01 == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, temp_increaseResetCount02 + 1);
-    }
-    else
-        EEPROM_write(1, temp_increaseResetCount01 + 1);
-}
-
 //Program starts here
 void setup() {
     // put your setup code here, to run once:
@@ -426,6 +430,10 @@ void setup() {
     WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
+    
+    AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+    server.begin();
+    
     EEPROM.begin(10);
 
     increaseResetCount();
