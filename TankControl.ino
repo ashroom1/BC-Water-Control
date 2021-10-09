@@ -1,9 +1,10 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 #include <Ticker.h>
 #include <EEPROM.h>
-#include <ESP8266WebServer.h>
-#include <ElegantOTA.h>
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60) //Currently not used
@@ -29,15 +30,13 @@
 #define TANK "TANK"
 
 
-const char *ssid = "likith12345";
-const char *password = "*druthi#";
-const char *OTA_ssid = "admin";
-const char *OTA_password = "admin";
+const char *ssid = "SSID";
+const char *password = "PASSWORD";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
 const char *TOPIC_SolarTankMid = "Sensor/SolarMid";
-const char *TOPIC_MotorChange = "MotorStatusChange";
+const char *TOPIC_MotorStatusChange = "MotorStatusChange";
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";
 const char *TOPIC_BoardResetCountReset = "BoardResetCountReset";
@@ -52,7 +51,6 @@ const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) En
 // The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
 
 unsigned long lastOffMessage_millis;
-
 
 /*
  * --Save sensor malfunction in EEPROM--
@@ -123,10 +121,70 @@ unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value 
 
 WiFiClient wclient;
 PubSubClient client(wclient);
-ESP8266WebServer server(80);
+AsyncWebServer server(80);
 
 Ticker timer_to_reset;
 Ticker timer_5sec;
+
+void timer_fun_5sec() {
+    blink_flag = 1;
+    ++WifiInfo_flag;
+}
+
+uint8_t EEPROM_read_with_delay(int location_read) {
+    uint8_t temp = EEPROM.read(location_read);
+    delay(10);
+    return temp;
+}
+
+bool EEPROM_write(int location, int value_to_be_written) {
+
+    if(EEPROM_read_with_delay(location) == value_to_be_written)
+        return true;
+    else {
+        for(int i = 0; i < 5; i++) {
+            EEPROM.write(location, value_to_be_written);
+            delay(100);
+            if(EEPROM.commit()){
+//                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
+                return true;
+            }
+//            EEPROM.end();
+//            delay(10);
+        }
+    }
+    return false;
+}
+
+void resetVar() {
+    solartimer_flag = 1;
+}
+
+void increaseResetCount() {
+
+    int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
+    int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
+    int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
+
+    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, 0);
+        EEPROM_write(3, temp_increaseResetCount03 + 1);
+    }
+    else if (temp_increaseResetCount01 == 0xff) {
+        EEPROM_write(1, 0);
+        EEPROM_write(2, temp_increaseResetCount02 + 1);
+    }
+    else
+        EEPROM_write(1, temp_increaseResetCount01 + 1);
+}
+
+bool check_and_publish(const char *Topic, const char *Message, bool Persistance) {/*Return type added because ternary op was expecting to return value*/
+
+    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
+        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
+    return 0;//See block comment above -bool, '0' is a dummy Value.
+}
 
 void setupWiFi() {
 
@@ -146,11 +204,11 @@ void connectMQTT() {
 // Commented- as it is added inside while loop below,         
 //     if(WiFi.status() != WL_CONNECTED)
 //         setupWiFi();
-    
+
     while (!client.connected()){
         if(WiFi.status() != WL_CONNECTED)
             setupWiFi(); // Connect to Wi-Fi if it gets disconnected in b/w
-        
+
         String clientID = "BCterrace-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
@@ -160,6 +218,7 @@ void connectMQTT() {
             client.subscribe(TOPIC_PingTank);
             client.subscribe(TOPIC_SensorMalfunctionReset);
             client.subscribe(TOPIC_SensorMalfunction);
+            client.subscribe(TOPIC_BoardResetCountReset);
         }
         else {
             //Blink Fast for MQTT Status(Not Connected) indication
@@ -173,13 +232,6 @@ void connectMQTT() {
             delay(80);
         }
     }
-}
-
-bool check_and_publish(const char *Topic, const char *Message, bool Persistance) {/*Return type added because ternary op was expecting to return value*/
-
-    if((WiFi.status() == WL_CONNECTED) && (client.connected()))
-        Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
-    return 0;//See block comment above -bool, '0' is a dummy Value.
 }
 
 void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
@@ -202,7 +254,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
 
             //check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             motor_state = 0;
-            check_and_publish(TOPIC_MotorChange, OFF, 0);   //Safety
+            check_and_publish(TOPIC_MotorStatusChange, OFF, 0);   //Safety
 
             sensor_malfunction = 1;
         }
@@ -222,7 +274,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             EEPROM_write(1, 0);
             EEPROM_write(2, 0);
             EEPROM_write(3, 0);
-        }    
+        }
 
     if(!strcmp(msgTopic, TOPIC_SysKill))
         if(!strcmp(message, TANK) || !strcmp(message, ALL))
@@ -243,52 +295,11 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             motor_state = 0; //Check comment below
             solartimer_flag = 0;
             onTimerFlag = 0;
-//            check_and_publish(TOPIC_MotorChange, OFF, 0); // Commented due to Toggle issue NEVER UNCOMMENT THIS- (This will be taken care in setup() of MOTOR when it gets RESET)
+//            check_and_publish(TOPIC_MotorStatusChange, OFF, 0); // Commented due to Toggle issue NEVER UNCOMMENT THIS- (This will be taken care in setup() of MOTOR when it gets RESET)
             lastOffMessage_millis = millis();
             timer_to_reset.detach();      //If motor was ON due to solar timer, we need to stop the ticker because the motor is now OFF.
             check_and_publish(TOPIC_GroundResetAndAcknowledge, ACK, 1);
         }
-}
-
-void timer_fun_5sec() {
-    blink_flag = 1;
-    ++WifiInfo_flag;
-}
-
-bool EEPROM_write(int location, int value_to_be_written) {
-
-    if(EEPROM.read(location) == value_to_be_written)
-        return true;
-    else {
-        for(int i = 0; i < 5; i++) {
-            EEPROM.write(location, value_to_be_written);
-            if(EEPROM.commit()){
-                EEPROM.end();
-                return true;
-            }
-            EEPROM.end();
-            delay(10);
-        }
-    }
-    return false;
-}
-
-void resetVar() {
-    solartimer_flag = 1;
-}
-
-void increaseResetCount() {
-    if (EEPROM.read(1) == 0xff && EEPROM.read(2) == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, 0);
-        EEPROM_write(3, EEPROM.read(3) + 1);
-    }
-    else if (EEPROM.read(1) == 0xff) {
-        EEPROM_write(1, 0);
-        EEPROM_write(2, EEPROM.read(2) + 1);
-    }
-    else
-        EEPROM_write(1, EEPROM.read(1) + 1);
 }
 
 void setup() {
@@ -310,17 +321,17 @@ void setup() {
     pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(LED_BUILTIN, LOW);// Initial state Of LED Active Low->specifying explicitly
 
-    increaseResetCount();
-
     WiFi.hostname("NodeMCU Tank");
     WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety 
     setupWiFi();
-
-    ElegantOTA.begin(&server, OTA_ssid, OTA_password);
+    
+    AsyncElegantOTA.begin(&server);    // Start ElegantOTA
     server.begin();
-
+    
     EEPROM.begin(10);
+
+    increaseResetCount();
 
     client.setServer(host_name, 1883);
     client.setCallback(callback);
@@ -333,7 +344,7 @@ void setup() {
         check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0); //This will handle EEPROM fail case(write)
     }
     else  { //This will handle EEPROM fail case(write)
-        if(EEPROM.read(0)) {
+        if(EEPROM_read_with_delay(0)) {
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             sensor_malfunction = 1;
         }
@@ -376,27 +387,29 @@ void loop() {
         motor_state = 0;
         solartimer_flag = 0;
         onTimerFlag = 0;
-        check_and_publish(TOPIC_MotorChange, OFF, 0);
+        check_and_publish(TOPIC_MotorStatusChange, OFF, 0);
         lastOffMessage_millis = millis();
     }
 
-    static char Local_WifiData[110];
+    static char Local_WifiData[200];
     if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
-      uint8_t macAddr[6];
-      char *thislocalIP = (char *) &WiFi.localIP().v4();
-      uint8_t *bssid = WiFi.BSSID();
-      WiFi.macAddress(macAddr);
+        uint8_t macAddr[6];
+        char *thislocalIP = (char *) &WiFi.localIP().v4();
+        uint8_t *bssid = WiFi.BSSID();
+        WiFi.macAddress(macAddr);
 
-      uint32_t resetCount = 0;
-      resetCount |= (uint32_t) EEPROM.read(3);
-      resetCount <<= 8;
-      resetCount |= (uint32_t) EEPROM.read(2);
-      resetCount <<= 8;
-      resetCount |= (uint32_t) EEPROM.read(1);
+        uint32_t resetCount = 0;
 
-      sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
-      check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
-      WifiInfo_flag = 0;
+        // Merging 3 bytes EEPROM data into 1 unsigned int
+        resetCount |= (uint32_t) EEPROM_read_with_delay(3);
+        resetCount *= 256; // Left shift 8 bits
+        resetCount |= (uint32_t) EEPROM_read_with_delay(2);
+        resetCount *= 256; // Left shift 8 bits
+        resetCount |= (uint32_t) EEPROM_read_with_delay(1);
+
+        sprintf(Local_WifiData, "Tank\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
+        check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
+        WifiInfo_flag = 0;
     }
 
     s1prev = s1;
@@ -416,11 +429,11 @@ void loop() {
             //if(!motor_state) {    //Comment if ON message is to be sent multiple times
 
             if(!s1 && !s3)
-                check_and_publish(TOPIC_MotorChange, ONs1s3, 0);
+                check_and_publish(TOPIC_MotorStatusChange, ONs1s3, 0);
             else if(!s1)
-                check_and_publish(TOPIC_MotorChange, ONs1, 0);
+                check_and_publish(TOPIC_MotorStatusChange, ONs1, 0);
             else if(!s3)
-                check_and_publish(TOPIC_MotorChange, ONs3, 0);
+                check_and_publish(TOPIC_MotorStatusChange, ONs3, 0);
 
             motor_state = 1;
             //}
@@ -434,26 +447,26 @@ void loop() {
 
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             motor_state = 0;
-            check_and_publish(TOPIC_MotorChange, OFF, 0);   //Safety
+            check_and_publish(TOPIC_MotorStatusChange, OFF, 0);   //Safety
 
             sensor_malfunction = 1;
         }
 
         else if (s2 && !s3 && s1) {
             //Use timer to turn on
-            check_and_publish(TOPIC_MotorChange, ON_WITH_TIMER, 0);
+            check_and_publish(TOPIC_MotorStatusChange, ON_WITH_TIMER, 0);
             onTimerFlag = 1;
             // if(!motor_state) { 
-                motor_state = 1;
-                timer_to_reset.detach(); 
-                timer_to_reset.once(timer_solar_seconds, resetVar);
+            motor_state = 1;
+            timer_to_reset.detach();
+            timer_to_reset.once(timer_solar_seconds, resetVar);
             // } 
         }
 
         else if (s1 && !s2 && s3) {
             //Don't care
             if ((!motor_state) && (millis() - lastOffMessage_millis >= OFF_MESSAGE_FREQ_MILLISEC)){
-                check_and_publish(TOPIC_MotorChange, OFF, 0);
+                check_and_publish(TOPIC_MotorStatusChange, OFF, 0);
                 lastOffMessage_millis = millis();
             }
         }
@@ -461,12 +474,12 @@ void loop() {
         else if(!onTimerFlag){  //if solar timer is On don't send off message
             if(!motor_state){
                 if(millis() - lastOffMessage_millis >= OFF_MESSAGE_FREQ_MILLISEC){
-                    check_and_publish(TOPIC_MotorChange, OFF, 0);
+                    check_and_publish(TOPIC_MotorStatusChange, OFF, 0);
                     lastOffMessage_millis = millis();
                 }
             }
             else {
-                check_and_publish(TOPIC_MotorChange, OFF, 0);
+                check_and_publish(TOPIC_MotorStatusChange, OFF, 0);
                 motor_state = 0;
                 lastOffMessage_millis = millis();
             }
