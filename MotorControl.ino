@@ -6,6 +6,8 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
+#define FIRMWARE_VERSION "0.0.1"
+
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60)
 #define MAX_MSG_LENGTH 25
@@ -492,7 +494,7 @@ void loop() {
         CurrentMotorState_message_flag = 0;
     }
 
-    static char Local_WifiData[200];
+    static char Local_WifiData[300];
     if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
         uint8_t macAddr[6];
         char *thislocalIP = (char *) &WiFi.localIP().v4();
@@ -508,7 +510,7 @@ void loop() {
         resetCount *= 256; // Left shift 8 bits
         resetCount |= (uint32_t) EEPROM_read_with_delay(1);
 
-        sprintf(Local_WifiData, "Motor\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\nRSSI: %d dBm\nBoard reset count: %u\n", *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5], WiFi.RSSI(), resetCount);
+        sprintf(Local_WifiData, "Motor\nFirmware Version: %s\nRSSI: %d dBm\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
         WifiInfo_flag = 0;
     }
