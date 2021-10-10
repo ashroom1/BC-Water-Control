@@ -392,7 +392,7 @@ void loop() {
         lastOffMessage_millis = millis();
     }
 
-    static char Local_WifiData[200];
+    static char Local_WifiData[300];
     if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
         uint8_t macAddr[6];
         char *thislocalIP = (char *) &WiFi.localIP().v4();
