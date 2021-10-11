@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.0.1"
+#define FIRMWARE_VERSION "0.1.0"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60) //Currently not used
