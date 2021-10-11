@@ -47,7 +47,8 @@ const char *TOPIC_TankResponse = "TankResponse";
 const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge"; //If Ground RESET- Reset all timers and motor_state () in TOPIC_GroundResetAndAcknowledge
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_WifiInfo = "WifiInfo";
-const char *TOPIC_SystemError = "SystemError";
+const char *TOPIC_SystemErrorSensorMalfunction = "SystemError/SensorMalfunction";
+const char *TOPIC_SystemErrorSensorMalfunctionEEPROM = "SystemError/SensorMalfunctionEEPROM";
 
 const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) Enter Solar tank Overflow Timer value in seconds
 // The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
@@ -348,7 +349,7 @@ void setup() {
     else  { //This will handle EEPROM fail case(write)
         if(EEPROM_read_with_delay(0)) {
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
-            check_and_publish(TOPIC_SystemError, "Sensor Malfunction 3", 0);
+            check_and_publish(TOPIC_SystemErrorSensorMalfunctionEEPROM, "Sensor Malfunction 3", 1);
             sensor_malfunction = 1;
         }
         else {
@@ -449,7 +450,7 @@ void loop() {
             EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
 
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
-            check_and_publish(TOPIC_SystemError, "Sensor Malfunction 4", 0);
+            check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 4", 1);
             motor_state = 0;
             check_and_publish(TOPIC_MotorStatusChange, OFF, 0);   //Safety
 
