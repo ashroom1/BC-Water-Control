@@ -211,10 +211,8 @@ void turn_off_motor() {
 void check_manual() {
 
     static unsigned long initial_time = 0;
-
-    bool manualEnablePrev = manualEnable;           //Move up below blink
+    
     manualEnable = digitalRead(ManualOverride);
-
 
     if (!wait_on_disconnect_to_turnoff) {
         wait_on_disconnect_to_turnoff = 1;
