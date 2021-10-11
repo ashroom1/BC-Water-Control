@@ -50,7 +50,7 @@ const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
 const char *TOPIC_WifiInfo = "WifiInfo";
-const char *TOPIC_SystemError = "SystemError";
+const char *TOPIC_SystemErrorSensorMalfunction = "SystemError/SensorMalfunction";
 
 bool blink_flag;   //Blink Flag interrupt
 bool CurrentMotorState_message_flag;  //interrupt to send frequent on/off messages
@@ -356,7 +356,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
                 if (on_solar_illegal) {
                     sensor_malfunction = 1;
                     check_and_publish(TOPIC_SensorMalfunction, ON, 1);
-                    check_and_publish(TOPIC_SystemError, "Sensor Malfunction 1", 0);
+                    check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 1", 1);
                 }
                 else {
                     turn_on_motor();
@@ -561,7 +561,7 @@ void loop() {
             //Fatal error
             check_and_publish(TOPIC_MotorTimeoutWarning, ON, 1);    //Will be cleared by SensorMalfunctionReset by the tank
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);      //Will be cleared by SensorMalfunctionReset by the tank
-            check_and_publish(TOPIC_SystemError, "Sensor Malfunction 2", 0);
+            check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 2", 1);
         }
     }
 
