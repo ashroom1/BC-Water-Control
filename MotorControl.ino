@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION "0.2.0"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60)
@@ -83,9 +83,10 @@ PubSubClient client(wclient);
 AsyncWebServer server(80);
 
 const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
-const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank) + 13min(To fill 60% of Solar Tank of 13min)
-const float timer_s1 = 34*60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34min = 26min(To fill 100% of Main Tank) + 8min(To fill 60% of Solar Tank of 13min)
-const float timer_s3 = 7*60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0
+                                                                                            //6mins with buffer, 6min = 0min(To fill 0% of Main Tank of 26min) + 6min(To fill ~50% of Solar Tank of 13min)
+const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank of 26min) + 13min(To fill 100% of Solar Tank of 13min)
+const float timer_s1 = 34*60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34mins w/o buffer, 34min = 26min(To fill 100% of Main Tank of 26min) + 8min(To fill 60% of Solar Tank of 13min)
+const float timer_s3 = 28*60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0     //28min with buffer, 27min = 14min(To fill ~50% of Main Tank of 26min) + 13min(To fill 100% of Solar Tank of 13min)
 const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition from manual to auto
 
 /*
@@ -94,18 +95,18 @@ const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition 
  *(1) --Add error message when motor is Turned OFF via Timer--
  *(1) -?-?Maintain backlog messages to be sent if WiFi or MQTT does not connect.-?-?
  *(1) --Check manual override in ConnectMQTT and connectWifi and take action immediately on motor.--
- *(2) ??Same as below - Delay("Or thought to be given") to be added during Manual Override ON to OFF(turned to Auto) Transition, To avoid toggle of Motor from Off(due to Manual Override) to On(due to auto)??
+ *(2) --Same as below - Delay("Or thought to be given") to be added during Manual Override ON to OFF(turned to Auto) Transition, To avoid toggle of Motor from Off(due to Manual Override) to On(due to auto).--
  *(2) ??Same as below - Add delay everywhere we turn off motor to avoid immediate turn on??
  *(2) To be solved after debugging - Frequent ON-OFF/OFF-ON messages from tank control leads to error message and motor is turned OFF. ON-OFF transition cannot happen within a minimum specified timer(Ticker). Warning and error to be sent if such multiple transitions happen.
- *(3) ??Addressed above - Maybe send manualOverride message less frequently to avoid wasting time at both ends.??
- *(3) Send "TOPIC_CurrentMotorState" and "TOPIC_ManualOverride" messages constantly (maybe once in 10s) in the loop.
- *(3) Board reset counter to be maintained in EEPROM and sent if requested through MQTT(new topic maybe required).
+ *(3) --Addressed above - Maybe send manualOverride message less frequently to avoid wasting time at both ends.--
+ *(3) --Send "TOPIC_CurrentMotorState" and "TOPIC_ManualOverride" messages constantly (maybe once in 10s) in the loop.--
+ *(3) --Board reset counter to be maintained in EEPROM and sent if requested through MQTT(new topic maybe required).--
  *(4) --Implement function to turn ON/OFF motor instead of repeating code.--
- *(4) ??Not required as of now - Ticker tank_response;   //Probably can be removed??
- *(4) ??const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant -> Can be used by broker to make sure motor is active.??
- *(4) ??Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)??
- *(4) ??Remove String class - Can lead to board reset!!??
- *(4) Ping tank more often when motor is ON
+ *(4) --Implement - Ticker tank_response--
+ *(4) ??const char *TOPIC_PingGround = "PingGround";  //To be checked Redundant PingTank can be used instead(STATUS)-> Can be used by broker to make sure motor is active.??
+ *(4) --Not Required-Check Ticker overlap/clash, Ping Tank & Blink LED: Test in Ticker Only Program (Priority?)--
+ *(4) --Remove String class - Can lead to board reset!!--
+ *(4) --Not required-Ping tank more often when motor is ON--
  *
 */
 
@@ -211,7 +212,7 @@ void turn_off_motor() {
 void check_manual() {
 
     static unsigned long initial_time = 0;
-    
+
     manualEnable = digitalRead(ManualOverride);
 
     if (!wait_on_disconnect_to_turnoff) {
@@ -345,6 +346,8 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         if(!strcmp(message, OFF)) {
             if(motor_state) {
                 turn_off_motor();
+                waterTimer_flag = 0;
+                pureTimer_flag = 0;
                 water_timer.detach(); //Turn off Fail-safe Timer
             }
         }
@@ -416,12 +419,6 @@ void setup() {
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
 
-    //Redundant To be checked if Off message is require at Start
-    manualEnable = digitalRead(ManualOverride);
-    if(!manualEnable)
-        turn_off_motor();
-
-
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     motor_state = 0;
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
@@ -431,10 +428,10 @@ void setup() {
     WiFi.setOutputPower(20.5);
     WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
-    
+
     AsyncElegantOTA.begin(&server);    // Start ElegantOTA
     server.begin();
-    
+
     EEPROM.begin(10);
 
     increaseResetCount();
@@ -542,9 +539,6 @@ void loop() {
 
     if(waterTimer_flag && !manualEnable/*Just to make sure (reliability), not actually needed*/) {
 
-        if(!pureTimer_flag)
-            sensor_malfunction = 1;
-
         if(motor_state)
             turn_off_motor();
 
@@ -557,6 +551,7 @@ void loop() {
         }
         else {
             //Fatal error
+            sensor_malfunction = 1;
             check_and_publish(TOPIC_MotorTimeoutWarning, ON, 1);    //Will be cleared by SensorMalfunctionReset by the tank
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);      //Will be cleared by SensorMalfunctionReset by the tank
             check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 2", 1);
@@ -587,6 +582,8 @@ void loop() {
         if(no_response_count > 2) { //Wait for 3 response failures
             tank_responsive = 0;
             turn_off_motor();
+            waterTimer_flag = 0;
+            pureTimer_flag = 0;
             water_timer.detach();   //Turn off Fail-safe Timer
         }
     }
