@@ -6,28 +6,29 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.2.0"
+#define FIRMWARE_VERSION "1.0.0"
 
-#define SECONDS(s) s*1000
-#define MINUTES(m) m*SECONDS(60)
-#define MAX_MSG_LENGTH 25
-#define SOLAR_ILLEGAL_WAITTIME_SECONDS 600      //Time to be elapsed before the next ON_WITH_TIMER message is expected.
-#define PING_TANK_INTERVAL 6                    //Ping the tank this often
-#define TANK_RESPONSE_WAITTIME (PING_TANK_INTERVAL-1) //Wait for this
-#define WIFI_INFO_FREQUENCY_SECONDS 10  //Enter values in multiples of 5
-#define MANUAL_OVERRIDE_FREQUENCY_SECONDS 10  //Enter values in multiples of 5
+#define SECONDS(s) (s * 1000)
+#define MINUTES(m) (m * SECONDS(60))
+#define MAX_MSG_LENGTH 25                               //If longer messages are subscribed to, buffer might overflow.
+#define SOLAR_ILLEGAL_WAITTIME_SECONDS 600              //Time to be elapsed before the next ON_SOLAR_TIMER message is expected.
+#define PING_TANK_INTERVAL 6                            //Ping the tank this often
+#define TANK_RESPONSE_WAITTIME (PING_TANK_INTERVAL - 1) //Wait for this
+#define WIFI_INFO_FREQUENCY_SECONDS 10                  //Enter values in multiples of 5
+#define MANUAL_OVERRIDE_FREQUENCY_SECONDS 10            //Enter values in multiples of 5
 
 #define Motor D5
 #define ManualOverride D6
 #define ManualControl D7
+#define Sump D1
 
 #define ON "ON"
-#define ONs1s3 "ONs1s3"
-#define ONs1 "ONs1"
-#define ONs3 "ONs3"
+#define ONS1S3 "ONs1s3"
+#define ONS1 "ONs1"
+#define ONS3 "ONs3"
 #define OFF "OFF"
 #define STATUS "STATUS"
-#define ON_WITH_TIMER "ONSolar"
+#define ON_SOLAR_TIMER "ONSolar"
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
@@ -35,29 +36,29 @@ const char *ssid = "SSID";
 const char *password = "PASSWORD";
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorStatusChange = "MotorStatusChange";
-const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
+const char *TOPIC_PingGround = "PingGround";    //For broker to know if Motor board is working.
 const char *TOPIC_GroundResponse = "GroundResponse";    //For broker to know if Motor board is working.
 const char *TOPIC_SysKill = "SysKill";
-const char *TOPIC_PingTank = "PingTank";        //Periodic message
-const char *TOPIC_TankResponse = "TankResponse";
-const char *TOPIC_ManualOverride = "ManualOverride";        //Periodic message
-const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";      //To be handled in broker.
+const char *TOPIC_PingTank = "PingTank";    //Periodic message
+const char *TOPIC_TankResponse = "TankResponse";    //Tank's response to PingTank
+const char *TOPIC_ManualOverride = "ManualOverride";    //Periodic message
+const char *TOPIC_MotorTimeoutWarning = "MotorTimeoutWarning";    //To be handled in broker.
 const char *TOPIC_GroundResetAndAcknowledge = "GroundResetAndAcknowledge";    //To know if motor control board is resetting often.
-const char *TOPIC_BoardResetCountReset = "BoardResetCountReset";
-//const char *TOPIC_RequestBoardResetCount = "RequestBoardResetCount";
-//const char *TOPIC_GroundResetCount = "GroundResetCount";
+const char *TOPIC_BoardResetCountReset = "BoardResetCountReset";    //To reset "board reset count"
 const char *TOPIC_SensorMalfunction = "SensorMalfunction";
 const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
-const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
+const char *TOPIC_CurrentMotorState = "CurrentMotorState";    //Periodic message
 const char *TOPIC_WifiInfo = "WifiInfo";
-const char *TOPIC_SystemErrorSensorMalfunction = "SystemError/SensorMalfunction";
+const char *TOPIC_SystemErrorSensorMalfunction = "SystemError/SensorMalfunction";   //Error codes
+const char *TOPIC_SensorSump = "Sensor/Sump";
 
-bool blink_flag;   //Blink Flag interrupt
-bool CurrentMotorState_message_flag;  //interrupt to send frequent on/off messages
+bool blink_flag;    //Blink Flag interrupt
+bool CurrentMotorState_message_flag;    //interrupt to send frequent on/off messages
 bool tankresponsefun_flag;    //Tank ping response interrupt
-bool pingNow_flag;  //Tank ping interrupt
+bool pingNow_flag;    //Tank ping interrupt
 bool waterTimer_flag;   //Water Timer interrupt
 bool pureTimer_flag;    //True when solar timer enabled
+bool sumpStatus_flag;   //Send sump sensor state if set
 bool motor_state;
 bool manualEnable;
 bool manualEnableIgnore;    //True during transition from manual to auto which avoids immediate motor toggle
@@ -66,14 +67,15 @@ bool tank_responsive;
 bool on_solar_illegal;
 bool sensor_malfunction;
 bool wait_on_disconnect_to_turnoff;
-int no_response_count = 0;
-unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
-unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
+bool sump_state;
+int no_response_count;
+unsigned short WifiInfo_flag;   //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
+unsigned short ManualOverride_flag;   //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
 
 unsigned long lastTankResponse = 4294967294;
 unsigned long pingTime;
 Ticker ping_tank;
-Ticker tank_response;   //Probably can be removed
+Ticker tank_response;
 Ticker timer_5sec;
 Ticker water_timer;
 Ticker make_solar_legal;
@@ -82,11 +84,11 @@ WiFiClient wclient;
 PubSubClient client(wclient);
 AsyncWebServer server(80);
 
-const float timer_pure_seconds = 6*60; //Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
+const float timer_pure_seconds = 6 * 60;//Sensor states- MainOVF=1, MainMid=1 & Solar=0      //Ideal sensor position - 35% of solar tank, timer value to be set = 50% of total solar tank capacity.
                                                                                             //6mins with buffer, 6min = 0min(To fill 0% of Main Tank of 26min) + 6min(To fill ~50% of Solar Tank of 13min)
-const float timer_s1s3 = 42*60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank of 26min) + 13min(To fill 100% of Solar Tank of 13min)
-const float timer_s1 = 34*60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34mins w/o buffer, 34min = 26min(To fill 100% of Main Tank of 26min) + 8min(To fill 60% of Solar Tank of 13min)
-const float timer_s3 = 28*60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0     //28min with buffer, 27min = 14min(To fill ~50% of Main Tank of 26min) + 13min(To fill 100% of Solar Tank of 13min)
+const float timer_s1s3 = 42 * 60;        //Sensor states- MainOVF=0, MainMid=0 & Solar=0      //42mins with buffer, 39min = 26min(To fill 100% of Main Tank of 26min) + 13min(To fill 100% of Solar Tank of 13min)
+const float timer_s1 = 34 * 60;          //Sensor states- MainOVF=0, MainMid=0 & Solar=1      //34mins w/o buffer, 34min = 26min(To fill 100% of Main Tank of 26min) + 8min(To fill 60% of Solar Tank of 13min)
+const float timer_s3 = 28 * 60;           //Sensor states- MainOVF=0, MainMid=1 & Solar=0     //28min with buffer, 27min = 14min(To fill ~50% of Main Tank of 26min) + 13min(To fill 100% of Solar Tank of 13min)
 const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition from manual to auto
 
 /*
@@ -110,30 +112,34 @@ const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition 
  *
 */
 
-void check_and_publish(const char *Topic, const char *Message, bool Persistance) {
-
+void check_and_publish(const char *Topic, const char *Message, bool Persistance) 
+{
     if((WiFi.status() == WL_CONNECTED) && (client.connected()))
         Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
-
 }
 
 //ISRs
-void timer_fun_5sec() {
+void timer_fun_5sec() 
+{
     blink_flag = 1;
     CurrentMotorState_message_flag = 1;
     ++WifiInfo_flag;
     ++ManualOverride_flag;
+    sumpStatus_flag = 1;
 }
 
-void waterTimer() {
+void waterTimer()
+{
     waterTimer_flag = 1;
 }
 
-void tankresponsefun() {
+void tankresponsefun()
+{
     tankresponsefun_flag = 1;
 }
 
-void pingNow() {
+void pingNow()
+{
     pingNow_flag = 1;
 }
 
@@ -147,21 +153,23 @@ void manualEnableIgnoreFun()
     manualEnableIgnore = 0;
 }
 
-uint8_t EEPROM_read_with_delay(int location_read) {
+uint8_t EEPROM_read_with_delay(int location_read)
+{
     uint8_t temp = EEPROM.read(location_read);
     delay(10);
     return temp;
 }
 
-bool EEPROM_write(int location, int value_to_be_written) {
-
+bool EEPROM_write(int location, int value_to_be_written)
+{
     if(EEPROM_read_with_delay(location) == value_to_be_written)
         return true;
-    else {
+    else 
+    {
         for(int i = 0; i < 5; i++) {
             EEPROM.write(location, value_to_be_written);
             delay(100);
-            if(EEPROM.commit()){
+            if(EEPROM.commit()) {
 //                EEPROM.end(); // If this function is called EEPROM is disabled and can no longer be used until EEPROM.begin is called.
                 return true;
             }
@@ -172,18 +180,18 @@ bool EEPROM_write(int location, int value_to_be_written) {
     return false;
 }
 
-void increaseResetCount() {
-
+void increaseResetCount() 
+{
     int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
     int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
     int temp_increaseResetCount03 = EEPROM_read_with_delay(3);
 
-    if (temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
+    if(temp_increaseResetCount01 == 0xff && temp_increaseResetCount02 == 0xff) {
         EEPROM_write(1, 0);
         EEPROM_write(2, 0);
         EEPROM_write(3, temp_increaseResetCount03 + 1);
     }
-    else if (temp_increaseResetCount01 == 0xff) {
+    else if(temp_increaseResetCount01 == 0xff) {
         EEPROM_write(1, 0);
         EEPROM_write(2, temp_increaseResetCount02 + 1);
     }
@@ -191,37 +199,34 @@ void increaseResetCount() {
         EEPROM_write(1, temp_increaseResetCount01 + 1);
 }
 
-void turn_on_motor() {
-
+void turn_on_motor() 
+{
     digitalWrite(Motor, HIGH);
-    if(!motor_state)        //Send only once when motor_state changes. Avoids message flooding
+    if(!motor_state)    //Send only once when motor_state changes. Avoids message flooding
         check_and_publish(TOPIC_CurrentMotorState, ON, 0);
     motor_state = 1;
-
 }
 
-void turn_off_motor() {
-
+void turn_off_motor()
+{
     digitalWrite(Motor, LOW);
-    if(motor_state)         //Send only once when motor_state changes. Avoids message flooding
+    if(motor_state)   //Send only once when motor_state changes. Avoids message flooding
         check_and_publish(TOPIC_CurrentMotorState, OFF, 0);
     motor_state = 0;
-
 }
 
-void check_manual() {
-
+void check_manual()
+{
     static unsigned long initial_time = 0;
 
     manualEnable = digitalRead(ManualOverride);
 
-    if (!wait_on_disconnect_to_turnoff) {
+    if(!wait_on_disconnect_to_turnoff) {
         wait_on_disconnect_to_turnoff = 1;
         initial_time = millis();
     }
 
     if(manualEnable) {
-
         waterTimer_flag = 0;    //Reset timer variables and detach timer
         pureTimer_flag = 0;
         water_timer.detach();
@@ -234,15 +239,14 @@ void check_manual() {
             turn_off_motor();
     }
     else {
-        if (motor_state && (millis() - initial_time) > SECONDS(5))  //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
-        {
-            turn_off_motor();            // [Bug(Ver1.0) Found during "MQTT/Wi-Fi Disconnect and Motor On" situations- Water Over flow (~~+10mins of excess)]
+        if(motor_state && (millis() - initial_time) > SECONDS(5)) {   //Added "if" statement to avoid setting ticker multiple times while Motor=0 (Off)
+            turn_off_motor();   //[Bug(Ver1.0) Found during "MQTT/Wi-Fi Disconnect and Motor On" situations- Water Over flow (~~+10mins of excess)]
 
             waterTimer_flag = 0;    //See Above, bug fix: For Safety Reasons- Reset timer variables and detach timer
             pureTimer_flag = 0;
             water_timer.detach();
             //Commented below Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
-            //         if(manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
+            //         if(Local_manualEnablePrev && !manualEnable && motor_state)        //Turn off motor when Manual override is turned off while motor is ON.
             //         {
             //             motor_state = 0;         //Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect//Bug Fix Water Overflow during - MQTT/Wi-Fi disconnect
             //             digitalWrite(Motor, LOW);
@@ -253,8 +257,8 @@ void check_manual() {
     }
 }
 
-void setupWiFi() {
-
+void setupWiFi()
+{
     digitalWrite(LED_BUILTIN, LOW);     //LED always ON
 
     WiFi.mode(WIFI_STA);
@@ -269,10 +273,9 @@ void setupWiFi() {
     delay(10);
 }
 
-void connectMQTT() {
-
+void connectMQTT()
+{
     while(!client.connected()) {
-
         if(WiFi.status() != WL_CONNECTED)
             setupWiFi();
 
@@ -281,7 +284,7 @@ void connectMQTT() {
         String clientID = "BCground-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
-        if(client.connect(clientID.c_str())){   //Subscribe to required topics
+        if(client.connect(clientID.c_str())) {   //Subscribe to required topics   
             client.subscribe(TOPIC_TankResponse);
             client.subscribe(TOPIC_SysKill);
             client.subscribe(TOPIC_MotorStatusChange);
@@ -298,14 +301,14 @@ void connectMQTT() {
             digitalWrite(LED_BUILTIN, LOW);
             delay(100);
             digitalWrite(LED_BUILTIN, HIGH);
-            delay(80);      //To make LED pattern consistent. There might be delay in the rest of the loop.
+            delay(80);    //To make LED pattern consistent. There might be delay in the rest of the loop.
         }
     }
 }
 
-void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
-
-    static char message[MAX_MSG_LENGTH + 1];
+void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength)
+{
+    static char message[MAX_MSG_LENGTH + 1];    //If longer messages are subscribed to, buffer might overflow.
 
     memcpy(message, (char *) msgPayload, msgLength);
     message[msgLength] = '\0';
@@ -330,7 +333,6 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
         if(!strcmp(message, MOTOR) || !strcmp(message, ALL)) {
             if(motor_state)
                 turn_off_motor();
-
             ESP.deepSleep(0);
         }
 
@@ -341,20 +343,18 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             EEPROM_write(3, 0);
         }
 
-    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
-
-        if(!strcmp(message, OFF)) {
+    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction && sump_state) {
+        if(!strcmp(message, OFF))
             if(motor_state) {
                 turn_off_motor();
                 waterTimer_flag = 0;
                 pureTimer_flag = 0;
-                water_timer.detach(); //Turn off Fail-safe Timer
+                water_timer.detach();   //Turn off Fail-safe Timer
             }
-        }
 
-        if(!strcmp(message, ON_WITH_TIMER)) {
+        if(!strcmp(message, ON_SOLAR_TIMER))
             if(!motor_state) {
-                if (on_solar_illegal) {
+                if(on_solar_illegal) {
                     sensor_malfunction = 1;
                     check_and_publish(TOPIC_SensorMalfunction, ON, 1);
                     check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 1", 1);
@@ -365,36 +365,31 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
                     water_timer.once(timer_pure_seconds, waterTimer);
                 }
             }
-        }
 
-        if(!strcmp(message, ONs1s3)) {
+        if(!strcmp(message, ONS1S3))
             if(!motor_state) {
                 turn_on_motor();
                 water_timer.once(timer_s1s3, waterTimer);
             }
-        }
 
-        if(!strcmp(message, ONs1)) {
+        if(!strcmp(message, ONS1))
             if(!motor_state) {
                 turn_on_motor();
                 water_timer.once(timer_s1, waterTimer);
             }
-        }
 
-        if(!strcmp(message, ONs3)) {
+        if(!strcmp(message, ONS3))
             if(!motor_state) {
                 turn_on_motor();
                 water_timer.once(timer_s3, waterTimer);
             }
-        }
     }
 }
 
 //Program starts here
-void setup() {
+void setup()
+{
     // put your setup code here, to run once:
-
-    // Serial.begin(115200);
 
     //MQTT Connect Timeout Decreased from 15 seconds to 5 seconds
     // client.setSocketTimeout(5);
@@ -413,23 +408,26 @@ void setup() {
     wait_on_disconnect_to_turnoff = 0;
     WifiInfo_flag = 0;
     ManualOverride_flag = 0;
+    sumpStatus_flag = 0;
+    sump_state = 0;
+    no_response_count = 0;
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
+    pinMode(Sump, INPUT);
 
-    digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
-    motor_state = 0;
-    digitalWrite(Motor, LOW); //Set default Motor state to LOW
+    digitalWrite(LED_BUILTIN, LOW);   //Initial state Of LED Active Low->specifying explicitly
+    digitalWrite(Motor, LOW);   //Set default Motor state to LOW. motor_state made zero above
     delay(1000);
 
     WiFi.hostname("NodeMCU Motor");
-    WiFi.setOutputPower(20.5);
-    WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
+    WiFi.setOutputPower(20.5);    //Max TX power
+    WiFi.setAutoReconnect(true);    //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
 
-    AsyncElegantOTA.begin(&server);    // Start ElegantOTA
+    AsyncElegantOTA.begin(&server);    //Start ElegantOTA
     server.begin();
 
     EEPROM.begin(10);
@@ -441,12 +439,12 @@ void setup() {
     client.setServer(host_name, 1883);
     client.setCallback(callback);
 
-    if (WiFi.status() == WL_CONNECTED) {
+    if(WiFi.status() == WL_CONNECTED) {
         connectMQTT();
         wait_on_disconnect_to_turnoff = 0;
     }
 
-    check_and_publish(TOPIC_GroundResetAndAcknowledge, ON, 1);      //Be persistent
+    check_and_publish(TOPIC_GroundResetAndAcknowledge, ON, 1);
 
     for(int i = 0; i <= 10; i++){
         digitalWrite(LED_BUILTIN, LOW);
@@ -474,48 +472,41 @@ void loop() {
         wait_on_disconnect_to_turnoff = 0;
     }
 
-//    Redundant: LED turned ON inside setupWiFi()
-//    if(WiFi.status() != WL_CONNECTED) {        //Redundant "if" statement needed. Because we need to turn ON the LED only if Wifi is not connected.
-//        digitalWrite(LED_BUILTIN, LOW);
-//        delay(10);
-//    }
-
-    if(!client.connected() && (WiFi.status() == WL_CONNECTED)) {  //Make sure MQTT is connected
+    if(!client.connected() && (WiFi.status() == WL_CONNECTED)) {    //Make sure MQTT is connected
         connectMQTT();
         wait_on_disconnect_to_turnoff = 0;
     }
 
-    if (CurrentMotorState_message_flag) {   //Repeated on/off message
+    if(CurrentMotorState_message_flag) {    //Repeated on/off message
         check_and_publish(TOPIC_CurrentMotorState, motor_state ? ON : OFF, 0);
         CurrentMotorState_message_flag = 0;
     }
 
     static char Local_WifiData[300];
-    if (WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
-        uint8_t macAddr[6];
-        char *thislocalIP = (char *) &WiFi.localIP().v4();
-        uint8_t *bssid = WiFi.BSSID();
-        WiFi.macAddress(macAddr);
+    if(WifiInfo_flag >= WIFI_INFO_FREQUENCY_SECONDS / 5) {
+        uint8_t Local_macAddr[6];
+        char *Local_thisIP = (char *) &WiFi.localIP().v4();
+        uint8_t *Local_bssid = WiFi.BSSID();
+        WiFi.macAddress(Local_macAddr);
 
-        uint32_t resetCount = 0;
+        uint32_t Local_resetCount = 0;
 
-        // Merging 3 bytes EEPROM data into 1 unsigned int
-        resetCount |= (uint32_t) EEPROM_read_with_delay(3);
-        resetCount *= 256; // Left shift 8 bits
-        resetCount |= (uint32_t) EEPROM_read_with_delay(2);
-        resetCount *= 256; // Left shift 8 bits
-        resetCount |= (uint32_t) EEPROM_read_with_delay(1);
+        //Merging 3 bytes EEPROM data into 1 unsigned int
+        Local_resetCount |= (uint32_t) EEPROM_read_with_delay(3);
+        Local_resetCount *= 256;    //Left shift 8 bits
+        Local_resetCount |= (uint32_t) EEPROM_read_with_delay(2);
+        Local_resetCount *= 256;    //Left shift 8 bits
+        Local_resetCount |= (uint32_t) EEPROM_read_with_delay(1);
 
-        sprintf(Local_WifiData, "Motor\nFirmware Version: %s\nRSSI: %d dBm\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+        sprintf(Local_WifiData, "Motor\nFirmware Version: %s\nRSSI: %d dBm\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), Local_resetCount, *Local_thisIP, *(Local_thisIP + 1), *(Local_thisIP + 2), *(Local_thisIP + 3), ESP.getFreeHeap(), Local_bssid[0], Local_bssid[1], Local_bssid[2], Local_bssid[3], Local_bssid[4], Local_bssid[5], Local_macAddr[0], Local_macAddr[1], Local_macAddr[2], Local_macAddr[3], Local_macAddr[4], Local_macAddr[5]);
         check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
         WifiInfo_flag = 0;
     }
 
     if(tankresponsefun_flag) {
-
-        unsigned long elapsed = lastTankResponse - pingTime;
-        if(elapsed < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
-            if(elapsed <= SECONDS(TANK_RESPONSE_WAITTIME)) {
+        unsigned long Local_elapsed = lastTankResponse - pingTime;
+        if(Local_elapsed < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
+            if(Local_elapsed <= SECONDS(TANK_RESPONSE_WAITTIME)) {
                 no_response_count = 0;
                 tank_responsive = 1;
             }
@@ -533,8 +524,15 @@ void loop() {
         tank_response.once(TANK_RESPONSE_WAITTIME, tankresponsefun);
         pingNow_flag = 0;
     }
+    
+    sump_state = digitalRead(Sump);
+    
+    if(sumpStatus_flag) {    
+        check_and_publish(TOPIC_SensorSump, sump_state ? ON : OFF, 0);
+        sumpStatus_flag = 0;
+    }
 
-    bool manualEnablePrev = manualEnable;
+    bool Local_manualEnablePrev = manualEnable;
     manualEnable = digitalRead(ManualOverride);
 
     if(waterTimer_flag && !manualEnable/*Just to make sure (reliability), not actually needed*/) {
@@ -559,7 +557,6 @@ void loop() {
     }
 
     if(manualEnable) {
-
         waterTimer_flag = 0;    //Reset timer variables and detach timer
         pureTimer_flag = 0;
         water_timer.detach();
@@ -572,14 +569,20 @@ void loop() {
             turn_off_motor();
     }
     else {
-
-        if(manualEnablePrev && !manualEnable && motor_state) {       //Turn off motor when Manual override is turned off while motor is ON.
+        if(Local_manualEnablePrev && !manualEnable && motor_state) {       //Turn off motor when Manual override is turned off while motor is ON.
             turn_off_motor();
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
         }
+        
+        if(!sump_state && motor_state) {    //Turn off motor if sump gets empty
+          turn_off_motor();
+          waterTimer_flag = 0;
+          pureTimer_flag = 0;
+          water_timer.detach();   //Turn off Fail-safe Timer
+        }
 
-        if(no_response_count > 2) { //Wait for 3 response failures
+        if(no_response_count > 2) {   //Wait for 3 response failures
             tank_responsive = 0;
             turn_off_motor();
             waterTimer_flag = 0;
@@ -588,7 +591,7 @@ void loop() {
         }
     }
 
-    if (ManualOverride_flag >= MANUAL_OVERRIDE_FREQUENCY_SECONDS / 5) {
+    if(ManualOverride_flag >= MANUAL_OVERRIDE_FREQUENCY_SECONDS / 5) {
         check_and_publish(TOPIC_ManualOverride, manualEnable ? ON : OFF, 0);
         ManualOverride_flag = 0;
     }
