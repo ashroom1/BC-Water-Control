@@ -23,12 +23,12 @@
 #define Sump D1
 
 #define ON "ON"
-#define ONS1S3 "ONs1s3"
-#define ONS1 "ONs1"
-#define ONS3 "ONs3"
+#define ONS1S3 "ONS1S3"
+#define ONS1 "ONS1"
+#define ONS3 "ONS3"
 #define OFF "OFF"
 #define STATUS "STATUS"
-#define ON_SOLAR_TIMER "ONSolar"
+#define ON_SOLAR_TIMER "ONSOLARTIMER"
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
@@ -112,14 +112,14 @@ const float timer_manualEnableIgnore = 10; //Don't change. Delay for transition 
  *
 */
 
-void check_and_publish(const char *Topic, const char *Message, bool Persistance) 
+void check_and_publish(const char *Topic, const char *Message, bool Persistance)
 {
     if((WiFi.status() == WL_CONNECTED) && (client.connected()))
         Persistance ? client.publish(Topic, (uint8_t*)Message, strlen(Message), true) : client.publish(Topic, Message);
 }
 
 //ISRs
-void timer_fun_5sec() 
+void timer_fun_5sec()
 {
     blink_flag = 1;
     CurrentMotorState_message_flag = 1;
@@ -164,7 +164,7 @@ bool EEPROM_write(int location, int value_to_be_written)
 {
     if(EEPROM_read_with_delay(location) == value_to_be_written)
         return true;
-    else 
+    else
     {
         for(int i = 0; i < 5; i++) {
             EEPROM.write(location, value_to_be_written);
@@ -180,7 +180,7 @@ bool EEPROM_write(int location, int value_to_be_written)
     return false;
 }
 
-void increaseResetCount() 
+void increaseResetCount()
 {
     int temp_increaseResetCount01 = EEPROM_read_with_delay(1);
     int temp_increaseResetCount02 = EEPROM_read_with_delay(2);
@@ -199,7 +199,7 @@ void increaseResetCount()
         EEPROM_write(1, temp_increaseResetCount01 + 1);
 }
 
-void turn_on_motor() 
+void turn_on_motor()
 {
     digitalWrite(Motor, HIGH);
     if(!motor_state)    //Send only once when motor_state changes. Avoids message flooding
@@ -284,7 +284,7 @@ void connectMQTT()
         String clientID = "BCground-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
 
-        if(client.connect(clientID.c_str())) {   //Subscribe to required topics   
+        if(client.connect(clientID.c_str())) {   //Subscribe to required topics
             client.subscribe(TOPIC_TankResponse);
             client.subscribe(TOPIC_SysKill);
             client.subscribe(TOPIC_MotorStatusChange);
@@ -524,10 +524,10 @@ void loop() {
         tank_response.once(TANK_RESPONSE_WAITTIME, tankresponsefun);
         pingNow_flag = 0;
     }
-    
+
     sump_state = digitalRead(Sump);
-    
-    if(sumpStatus_flag) {    
+
+    if(sumpStatus_flag) {
         check_and_publish(TOPIC_SensorSump, sump_state ? ON : OFF, 0);
         sumpStatus_flag = 0;
     }
@@ -574,7 +574,7 @@ void loop() {
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
         }
-        
+
         if(!sump_state && motor_state) {    //Turn off motor if sump gets empty
           turn_off_motor();
           waterTimer_flag = 0;
