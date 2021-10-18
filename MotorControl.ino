@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.2.0"
+#define FIRMWARE_VERSION "0.9.9"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60)
@@ -20,6 +20,7 @@
 #define Motor D5
 #define ManualOverride D6
 #define ManualControl D7
+#define Sump D1
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -51,11 +52,13 @@ const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
 const char *TOPIC_WifiInfo = "WifiInfo";
 const char *TOPIC_SystemErrorSensorMalfunction = "SystemError/SensorMalfunction";
+const char *TOPIC_SensorSump = "Sensor/Sump";
 
 bool blink_flag;   //Blink Flag interrupt
 bool CurrentMotorState_message_flag;  //interrupt to send frequent on/off messages
 bool tankresponsefun_flag;    //Tank ping response interrupt
 bool pingNow_flag;  //Tank ping interrupt
+bool sumpStatus_flag;   //Send sump sensor state if set
 bool waterTimer_flag;   //Water Timer interrupt
 bool pureTimer_flag;    //True when solar timer enabled
 bool motor_state;
@@ -66,6 +69,7 @@ bool tank_responsive;
 bool on_solar_illegal;
 bool sensor_malfunction;
 bool wait_on_disconnect_to_turnoff;
+bool sump_state;
 int no_response_count = 0;
 unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
 unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
@@ -123,6 +127,7 @@ void timer_fun_5sec() {
     CurrentMotorState_message_flag = 1;
     ++WifiInfo_flag;
     ++ManualOverride_flag;
+    sumpStatus_flag = 1;
 }
 
 void waterTimer() {
@@ -341,7 +346,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             EEPROM_write(3, 0);
         }
 
-    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
+    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction && sump_state) {
 
         if(!strcmp(message, OFF)) {
             if(motor_state) {
@@ -413,11 +418,15 @@ void setup() {
     wait_on_disconnect_to_turnoff = 0;
     WifiInfo_flag = 0;
     ManualOverride_flag = 0;
+    sumpStatus_flag = 0;
+    sump_state = 0;
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
+    pinMode(Sump, INPUT);
+
 
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     motor_state = 0;
@@ -533,6 +542,13 @@ void loop() {
         tank_response.once(TANK_RESPONSE_WAITTIME, tankresponsefun);
         pingNow_flag = 0;
     }
+  
+    sump_state = digitalRead(Sump);
+
+    if(sumpStatus_flag) {    
+        check_and_publish(TOPIC_SensorSump, sump_state ? ON : OFF, 0);
+        sumpStatus_flag = 0;
+    }
 
     bool manualEnablePrev = manualEnable;
     manualEnable = digitalRead(ManualOverride);
@@ -577,6 +593,13 @@ void loop() {
             turn_off_motor();
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
+        }
+      
+        if(!sump_state && motor_state) {    //Turn off motor if sump gets empty
+            turn_off_motor();
+            waterTimer_flag = 0;
+            pureTimer_flag = 0;
+            water_timer.detach();   //Turn off Fail-safe Timer
         }
 
         if(no_response_count > 2) { //Wait for 3 response failures
