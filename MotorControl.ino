@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.9.8"
+#define FIRMWARE_VERSION "0.9.7"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60)
@@ -32,8 +32,8 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "SSID";
-const char *password = "PASSWORD";
+const char *ssid = "SSID"
+const char *password = "PASSWORD"
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorStatusChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
