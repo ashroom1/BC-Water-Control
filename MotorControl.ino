@@ -550,7 +550,11 @@ void loop() {
     if(sumpStatus_flag) {
         bool sump_state_prev = sump_state;
         sump_state = digitalRead(Sump);
-
+      
+        if(!sump_state && sump_state_prev) {    //when sump sensor state changes from 1 to 0
+          check_and_publish(TOPIC_GroundResetAndAcknowledge, ON, 1);    //Alert tank to read sensor states & resend MotorStatusChange to avoid Don't care condition 
+        }
+      
         if(sump_state != sump_state_prev) {
             unsigned long Local_current_millis = millis();
             if(abs((signed long long) Local_current_millis - (signed long long) lastSumpStateChange) < MINUTES(1)) {
