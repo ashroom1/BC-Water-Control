@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.9.9"
+#define FIRMWARE_VERSION "0.9.8"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60)
@@ -75,6 +75,7 @@ unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value 
 unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
 
 unsigned long lastTankResponse = 4294967294;
+unsigned long lastSumpStateChange = 4294967294;
 unsigned long pingTime;
 Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
@@ -427,15 +428,16 @@ void setup() {
     pinMode(ManualControl, INPUT);
     pinMode(Sump, INPUT);
 
-
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     motor_state = 0;
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
 
+    sump_state = digitalRead(Sump);   //Aviods SensorMalfunction and set state to actual sensor value
+
     WiFi.hostname("NodeMCU Motor");
-    WiFi.setOutputPower(20.5);
-    WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
+    WiFi.setOutputPower(20.5);    //Set to Max Wi-Fi Tx Power
+    WiFi.setAutoReconnect(true);  //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
 
     AsyncElegantOTA.begin(&server);    // Start ElegantOTA
@@ -522,17 +524,19 @@ void loop() {
 
     if(tankresponsefun_flag) {
 
-        unsigned long elapsed = lastTankResponse - pingTime;
-        if(elapsed < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
-            if(elapsed <= SECONDS(TANK_RESPONSE_WAITTIME)) {
-                no_response_count = 0;
-                tank_responsive = 1;
-            }
-            else {
-                if(no_response_count < 10)
-                    ++no_response_count;
-            }
+        signed long long elapsed = (signed long long) lastTankResponse - (signed long long) pingTime;
+        //The below line can lead to interpreting tank response wrong.
+        //if(abs(elapsed) < MINUTES(48 * 60 /* 2 days */)) {       Handle millis overflow
+
+        if(abs(elapsed) <= SECONDS(TANK_RESPONSE_WAITTIME)) {
+            no_response_count = 0;
+            tank_responsive = 1;
         }
+        else {
+            if(no_response_count < 10)
+                ++no_response_count;
+        }
+        //}
         tankresponsefun_flag = 0;
     }
 
@@ -542,10 +546,21 @@ void loop() {
         tank_response.once(TANK_RESPONSE_WAITTIME, tankresponsefun);
         pingNow_flag = 0;
     }
-  
-    sump_state = digitalRead(Sump);
 
-    if(sumpStatus_flag) {    
+    if(sumpStatus_flag) {
+        bool sump_state_prev = sump_state;
+        sump_state = digitalRead(Sump);
+
+        if(sump_state != sump_state_prev) {
+            unsigned long Local_current_millis = millis();
+            if(abs((signed long long) Local_current_millis - (signed long long) lastSumpStateChange) < MINUTES(1)) {
+                sensor_malfunction = 1;
+                check_and_publish(TOPIC_SensorMalfunction, ON, 1);      //Will be cleared by SensorMalfunctionReset by the tank
+                check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 5", 1);
+            }
+            lastSumpStateChange = Local_current_millis;
+        }
+
         check_and_publish(TOPIC_SensorSump, sump_state ? ON : OFF, 0);
         sumpStatus_flag = 0;
     }
@@ -594,7 +609,7 @@ void loop() {
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
         }
-      
+
         if(!sump_state && motor_state) {    //Turn off motor if sump gets empty
             turn_off_motor();
             waterTimer_flag = 0;
