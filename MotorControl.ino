@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.2.0"
+#define FIRMWARE_VERSION "1.0.0"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60)
@@ -20,6 +20,7 @@
 #define Motor D5
 #define ManualOverride D6
 #define ManualControl D7
+#define Sump D1
 
 #define ON "ON"
 #define ONs1s3 "ONs1s3"
@@ -31,8 +32,8 @@
 #define ALL "ALL"
 #define MOTOR "MOTOR"
 
-const char *ssid = "SSID";
-const char *password = "PASSWORD";
+const char *ssid = "SSID"
+const char *password = "PASSWORD"
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MotorStatusChange = "MotorStatusChange";
 const char *TOPIC_PingGround = "PingGround";  //For broker to know if Motor board is working.
@@ -51,11 +52,13 @@ const char *TOPIC_SensorMalfunctionReset = "SensorMalfunctionReset";
 const char *TOPIC_CurrentMotorState = "CurrentMotorState";      //Periodic message
 const char *TOPIC_WifiInfo = "WifiInfo";
 const char *TOPIC_SystemErrorSensorMalfunction = "SystemError/SensorMalfunction";
+const char *TOPIC_SensorSump = "Sensor/Sump";
 
 bool blink_flag;   //Blink Flag interrupt
 bool CurrentMotorState_message_flag;  //interrupt to send frequent on/off messages
 bool tankresponsefun_flag;    //Tank ping response interrupt
 bool pingNow_flag;  //Tank ping interrupt
+bool sumpStatus_flag;   //Send sump sensor state if set
 bool waterTimer_flag;   //Water Timer interrupt
 bool pureTimer_flag;    //True when solar timer enabled
 bool motor_state;
@@ -66,11 +69,13 @@ bool tank_responsive;
 bool on_solar_illegal;
 bool sensor_malfunction;
 bool wait_on_disconnect_to_turnoff;
+bool sump_state;
 int no_response_count = 0;
 unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
 unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when value >= MANUAL_OVERRIDE_FREQUENCY_SECONDS ÷ 5)
 
 unsigned long lastTankResponse = 4294967294;
+unsigned long lastSumpStateChange = 4294967294;
 unsigned long pingTime;
 Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
@@ -123,6 +128,7 @@ void timer_fun_5sec() {
     CurrentMotorState_message_flag = 1;
     ++WifiInfo_flag;
     ++ManualOverride_flag;
+    sumpStatus_flag = 1;
 }
 
 void waterTimer() {
@@ -341,7 +347,7 @@ void callback(char *msgTopic, byte *msgPayload, unsigned int msgLength) {
             EEPROM_write(3, 0);
         }
 
-    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction) {
+    if(!strcmp(msgTopic, TOPIC_MotorStatusChange) && tank_responsive && !manualEnable && !manualEnableIgnore && !sensor_malfunction && sump_state) {
 
         if(!strcmp(message, OFF)) {
             if(motor_state) {
@@ -413,20 +419,25 @@ void setup() {
     wait_on_disconnect_to_turnoff = 0;
     WifiInfo_flag = 0;
     ManualOverride_flag = 0;
+    sumpStatus_flag = 0;
+    sump_state = 0;
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
     pinMode(ManualOverride, INPUT);
     pinMode(ManualControl, INPUT);
+    pinMode(Sump, INPUT);
 
     digitalWrite(LED_BUILTIN, LOW);     // Initial state Of LED Active Low->specifying explicitly
     motor_state = 0;
     digitalWrite(Motor, LOW); //Set default Motor state to LOW
     delay(1000);
 
+    sump_state = digitalRead(Sump);   //Aviods SensorMalfunction and set state to actual sensor value
+
     WiFi.hostname("NodeMCU Motor");
-    WiFi.setOutputPower(20.5);
-    WiFi.setAutoReconnect(true); //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
+    WiFi.setOutputPower(20.5);    //Set to Max Wi-Fi Tx Power
+    WiFi.setAutoReconnect(true);  //WiFi auto reconnect enabled - No need to call setupWifi() repeatedly but it is for safety
     setupWiFi();
 
     AsyncElegantOTA.begin(&server);    // Start ElegantOTA
@@ -513,17 +524,19 @@ void loop() {
 
     if(tankresponsefun_flag) {
 
-        unsigned long elapsed = lastTankResponse - pingTime;
-        if(elapsed < MINUTES(48 * 60 /* 2 days */)) {       //Handle millis overflow
-            if(elapsed <= SECONDS(TANK_RESPONSE_WAITTIME)) {
-                no_response_count = 0;
-                tank_responsive = 1;
-            }
-            else {
-                if(no_response_count < 10)
-                    ++no_response_count;
-            }
+        signed long long elapsed = (signed long long) lastTankResponse - (signed long long) pingTime;
+        //The below line can lead to interpreting tank response wrong.
+        //if(abs(elapsed) < MINUTES(48 * 60 /* 2 days */)) {       Handle millis overflow
+
+        if(abs(elapsed) <= SECONDS(TANK_RESPONSE_WAITTIME)) {
+            no_response_count = 0;
+            tank_responsive = 1;
         }
+        else {
+            if(no_response_count < 10)
+                ++no_response_count;
+        }
+        //}
         tankresponsefun_flag = 0;
     }
 
@@ -532,6 +545,28 @@ void loop() {
         pingTime = millis();
         tank_response.once(TANK_RESPONSE_WAITTIME, tankresponsefun);
         pingNow_flag = 0;
+    }
+
+    if(sumpStatus_flag) {
+        bool sump_state_prev = sump_state;
+        sump_state = digitalRead(Sump);
+      
+        if(!sump_state && sump_state_prev) {    //when sump sensor state changes from 1 to 0
+          check_and_publish(TOPIC_GroundResetAndAcknowledge, ON, 1);    //Alert tank to read sensor states & resend MotorStatusChange to avoid Don't care condition 
+        }
+      
+        if(sump_state != sump_state_prev) {
+            unsigned long Local_current_millis = millis();
+            if(abs((signed long long) Local_current_millis - (signed long long) lastSumpStateChange) < MINUTES(1)) {
+                sensor_malfunction = 1;
+                check_and_publish(TOPIC_SensorMalfunction, ON, 1);      //Will be cleared by SensorMalfunctionReset by the tank
+                check_and_publish(TOPIC_SystemErrorSensorMalfunction, "Sensor Malfunction 5", 1);
+            }
+            lastSumpStateChange = Local_current_millis;
+        }
+
+        check_and_publish(TOPIC_SensorSump, sump_state ? ON : OFF, 0);
+        sumpStatus_flag = 0;
     }
 
     bool manualEnablePrev = manualEnable;
@@ -577,6 +612,13 @@ void loop() {
             turn_off_motor();
             manualEnableIgnore = 1;
             Ticker_manualEnableIgnore.once(timer_manualEnableIgnore, manualEnableIgnoreFun);
+        }
+
+        if(!sump_state && motor_state) {    //Turn off motor if sump gets empty
+            turn_off_motor();
+            waterTimer_flag = 0;
+            pureTimer_flag = 0;
+            water_timer.detach();   //Turn off Fail-safe Timer
         }
 
         if(no_response_count > 2) { //Wait for 3 response failures
