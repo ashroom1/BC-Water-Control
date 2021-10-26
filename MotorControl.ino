@@ -77,6 +77,9 @@ unsigned short ManualOverride_flag;    //Non boolean flag (Considered true when 
 unsigned long lastTankResponse = 4294967294;
 unsigned long lastSumpStateChange = 4294967294;
 unsigned long pingTime;
+unsigned int mqttDisconnectCounter;
+unsigned int wifiDisconnectCounter;
+
 Ticker ping_tank;
 Ticker tank_response;   //Probably can be removed
 Ticker timer_5sec;
@@ -279,8 +282,10 @@ void connectMQTT() {
 
     while(!client.connected()) {
 
-        if(WiFi.status() != WL_CONNECTED)
+        if(WiFi.status() != WL_CONNECTED) {
+            ++wifiDisconnectCounter;
             setupWiFi();
+        }
 
         check_manual();
 
@@ -421,6 +426,8 @@ void setup() {
     ManualOverride_flag = 0;
     sumpStatus_flag = 0;
     sump_state = 0;
+    mqttDisconnectCounter = 0;
+    wifiDisconnectCounter = 0;
 
     pinMode(LED_BUILTIN, OUTPUT);
     pinMode(Motor, OUTPUT);
@@ -481,6 +488,7 @@ void loop() {
     }
 
     if(WiFi.status() != WL_CONNECTED) {
+        ++wifiDisconnectCounter;
         setupWiFi();
         wait_on_disconnect_to_turnoff = 0;
     }
@@ -492,6 +500,7 @@ void loop() {
 //    }
 
     if(!client.connected() && (WiFi.status() == WL_CONNECTED)) {  //Make sure MQTT is connected
+        ++mqttDisconnectCounter;
         connectMQTT();
         wait_on_disconnect_to_turnoff = 0;
     }
@@ -517,7 +526,7 @@ void loop() {
         resetCount *= 256; // Left shift 8 bits
         resetCount |= (uint32_t) EEPROM_read_with_delay(1);
 
-        sprintf(Local_WifiData, "Motor\nFirmware Version: %s\nRSSI: %d dBm\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+        sprintf(Local_WifiData, "Motor\nFirmware Version: %s\nRSSI: %d dBm\nWifi disconnect count: %u\nMQTT disconnect count: %u\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), wifiDisconnectCounter, mqttDisconnectCounter , resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
         WifiInfo_flag = 0;
     }
