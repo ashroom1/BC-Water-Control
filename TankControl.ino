@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION "0.1.1"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60) //Currently not used
@@ -31,8 +31,8 @@
 #define ACK "ACK"
 #define TANK "TANK"
 
-const char *ssid = "SSID";
-const char *password = "PASSWORD";
+const char *ssid = "SSID"
+const char *password = "PASSWORD"
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
