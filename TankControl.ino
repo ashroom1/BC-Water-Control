@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION "0.1.1"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60) //Currently not used
@@ -31,8 +31,8 @@
 #define ACK "ACK"
 #define TANK "TANK"
 
-const char *ssid = "SSID";
-const char *password = "PASSWORD";
+const char *ssid = "SSID"
+const char *password = "PASSWORD"
 const char *host_name = "192.168.0.105";
 const char *TOPIC_MainTankMid = "Sensor/MainMid";
 const char *TOPIC_MainTankOVF = "Sensor/MainOVF";
@@ -54,6 +54,8 @@ const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) En
 // The value here should be atleast 30s more than actual solar timer otherwise motor might trigger sensor malfunction.
 
 unsigned long lastOffMessage_millis;
+unsigned int mqttDisconnectCounter;
+unsigned int wifiDisconnectCounter;
 
 /*
  * --Save sensor malfunction in EEPROM--
@@ -209,8 +211,10 @@ void connectMQTT() {
 //         setupWiFi();
 
     while (!client.connected()){
-        if(WiFi.status() != WL_CONNECTED)
+        if(WiFi.status() != WL_CONNECTED) {
+            ++wifiDisconnectCounter;
             setupWiFi(); // Connect to Wi-Fi if it gets disconnected in b/w
+        }
 
         String clientID = "BCterrace-";
         clientID += String(random(0xffff), HEX);    //Unique client ID each time
@@ -316,6 +320,8 @@ void setup() {
     onTimerFlag = 0;
     EEPROM_Write_Flag = 0;
     WifiInfo_flag = 0;
+    mqttDisconnectCounter = 0;
+    wifiDisconnectCounter = 0;
 
     pinMode(SENSOR1, INPUT);
     pinMode(SENSOR2, INPUT);
@@ -378,11 +384,15 @@ void loop() {
         blink_flag = 0;
     }
 
-    if(WiFi.status() != WL_CONNECTED)
+    if(WiFi.status() != WL_CONNECTED) {
+        ++wifiDisconnectCounter;
         setupWiFi();
+    }
 
-    if(!client.connected())   //Make sure MQTT is connected
+    if(!client.connected()) {  //Make sure MQTT is connected
+        ++mqttDisconnectCounter;
         connectMQTT();
+    }
 
     if(EEPROM_Write_Flag)
         EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
@@ -411,7 +421,7 @@ void loop() {
         resetCount *= 256; // Left shift 8 bits
         resetCount |= (uint32_t) EEPROM_read_with_delay(1);
 
-        sprintf(Local_WifiData, "Tank\nFirmware Version: %s\nRSSI: %d dBm\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+        sprintf(Local_WifiData, "Tank\nFirmware Version: %s\nRSSI: %d dBm\nWifi disconnect count: %u\nMQTT disconnect count: %u\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), wifiDisconnectCounter, mqttDisconnectCounter, resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
         WifiInfo_flag = 0;
     }
