@@ -85,7 +85,6 @@ int mqttDisconnectCause;
 Issue: MotorStatus "OFF"(unintended) message was obtained inbetween "Ons1" messages
 Temporary Fix: Follow steps mentioned here for clearing "SensorMalfunction"
 Permanent Fix: Will be fixed in Ver.02 of software.
-Ref.image: "SensorMalfunction_Persistent-OFFmsg_error"
 
 Status of board when the fix was found
 {
@@ -355,10 +354,10 @@ void setup() {
     if(digitalRead(EEPROM_INIT_PIN)) {
         EEPROM_Value_To_Write = 0;
         EEPROM_Write_Flag = !EEPROM_write(0, EEPROM_Value_To_Write);
-        check_and_publish(TOPIC_SensorMalfunction, OFF, 1); //This will handle EEPROM fail case(write)
-        check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0); //This will handle EEPROM fail case(write)
+        check_and_publish(TOPIC_SensorMalfunction, OFF, 1); 
+        check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0);
     }
-    else  { //This will handle EEPROM fail case(write)
+    else {
         if(EEPROM_read_with_delay(0)) {
             check_and_publish(TOPIC_SensorMalfunction, ON, 1);
             check_and_publish(TOPIC_SystemErrorSensorMalfunctionEEPROM, "Sensor Malfunction 3", 1);
@@ -368,7 +367,7 @@ void setup() {
             check_and_publish(TOPIC_SensorMalfunction, OFF, 1);
             check_and_publish(TOPIC_SensorMalfunctionReset, ON, 0);//added due to Motor Program dependency -Backup message to be sent from RPi as well
         }
-    } //This will handle EEPROM fail case(write)
+    }
 
     for(int i=0; i<=10; i++){
         digitalWrite(LED_BUILTIN, LOW);
@@ -383,7 +382,7 @@ void setup() {
 
 void loop() {
     // put your main code here, to run repeatedly:
-    if(blink_flag){
+    if(blink_flag) {
         digitalWrite(LED_BUILTIN, LOW);  //Active low
         delay(500);
         digitalWrite(LED_BUILTIN, HIGH);
