@@ -6,7 +6,7 @@
 #include <Ticker.h>
 #include <EEPROM.h>
 
-#define FIRMWARE_VERSION "0.1.1"
+#define FIRMWARE_VERSION "0.2.0"
 
 #define SECONDS(s) s*1000
 #define MINUTES(m) m*SECONDS(60) //Currently not used
@@ -56,6 +56,7 @@ const int timer_solar_seconds = 7*60; //(6+1=7mins See next line for details) En
 unsigned long lastOffMessage_millis;
 unsigned int mqttDisconnectCounter;
 unsigned int wifiDisconnectCounter;
+int mqttDisconnectCause;
 
 /*
  * --Save sensor malfunction in EEPROM--
@@ -122,6 +123,7 @@ bool sensorStatusFlag;  //Flag for sending status of all sensors for the first t
 bool onTimerFlag;
 bool EEPROM_Write_Flag;
 bool EEPROM_Value_To_Write;
+bool motorStatusChangeFlag;   //To send MotorStatusChange messages periodically 
 unsigned short WifiInfo_flag;    //Non boolean flag (Considered true when value >= WIFI_INFO_FREQUENCY_SECONDS ÷ 5)
 
 WiFiClient wclient;
@@ -134,6 +136,8 @@ Ticker timer_5sec;
 void timer_fun_5sec() {
     blink_flag = 1;
     ++WifiInfo_flag;
+    sensorStatusFlag = 1;
+    motorStatusChangeFlag = 1;
 }
 
 uint8_t EEPROM_read_with_delay(int location_read) {
@@ -322,6 +326,8 @@ void setup() {
     WifiInfo_flag = 0;
     mqttDisconnectCounter = 0;
     wifiDisconnectCounter = 0;
+    mqttDisconnectCause = 0;
+    motorStatusChangeFlag = 0;
 
     pinMode(SENSOR1, INPUT);
     pinMode(SENSOR2, INPUT);
@@ -390,6 +396,7 @@ void loop() {
     }
 
     if(!client.connected()) {  //Make sure MQTT is connected
+        mqttDisconnectCause = client.state();
         ++mqttDisconnectCounter;
         connectMQTT();
     }
@@ -421,7 +428,7 @@ void loop() {
         resetCount *= 256; // Left shift 8 bits
         resetCount |= (uint32_t) EEPROM_read_with_delay(1);
 
-        sprintf(Local_WifiData, "Tank\nFirmware Version: %s\nRSSI: %d dBm\nWifi disconnect count: %u\nMQTT disconnect count: %u\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), wifiDisconnectCounter, mqttDisconnectCounter, resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
+        sprintf(Local_WifiData, "Tank\nFirmware Version: %s\nRSSI: %d dBm\nWifi disconnect count: %u\nMQTT disconnect count/cause: %u/%d\nBoard reset count: %u\nIP: %d.%d.%d.%d\nFree heap size: %d\nRouter MAC: %02x:%02x:%02x:%02x:%02x:%02x\nESP MAC: %02x:%02x:%02x:%02x:%02x:%02x\n", FIRMWARE_VERSION, WiFi.RSSI(), wifiDisconnectCounter, mqttDisconnectCounter, mqttDisconnectCause, resetCount, *thislocalIP, *(thislocalIP + 1), *(thislocalIP + 2), *(thislocalIP + 3), ESP.getFreeHeap(), bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], macAddr[0], macAddr[1], macAddr[2], macAddr[3], macAddr[4], macAddr[5]);
         check_and_publish(TOPIC_WifiInfo, Local_WifiData, 0);
         WifiInfo_flag = 0;
     }
@@ -440,17 +447,18 @@ void loop() {
 
             //Send command to turn on motor
 
-            //if(!motor_state) {    //Comment if ON message is to be sent multiple times
+            if(!motor_state || motorStatusChangeFlag) {    //Check (!motor_state) to send MotorStatusChange immediately to turn ON motor & motorStatusChangeFlag to send messages frequently/periodically
 
-            if(!s1 && !s3)
-                check_and_publish(TOPIC_MotorStatusChange, ONs1s3, 0);
-            else if(!s1)
-                check_and_publish(TOPIC_MotorStatusChange, ONs1, 0);
-            else if(!s3)
-                check_and_publish(TOPIC_MotorStatusChange, ONs3, 0);
-
-            motor_state = 1;
-            //}
+                if(!s1 && !s3)
+                    check_and_publish(TOPIC_MotorStatusChange, ONs1s3, 0);
+                else if(!s1)
+                    check_and_publish(TOPIC_MotorStatusChange, ONs1, 0);
+                else if(!s3)
+                    check_and_publish(TOPIC_MotorStatusChange, ONs3, 0);
+                
+                motorStatusChangeFlag = 0;
+                motor_state = 1;
+            }
         }
 
         else if(s2 && !s1) {
@@ -468,14 +476,15 @@ void loop() {
         }
 
         else if (s2 && !s3 && s1) {
-            //Use timer to turn on
-            check_and_publish(TOPIC_MotorStatusChange, ON_WITH_TIMER, 0);
-            onTimerFlag = 1;
-            // if(!motor_state) { 
-            motor_state = 1;
-            timer_to_reset.detach();
-            timer_to_reset.once(timer_solar_seconds, resetVar);
-            // } 
+            if(!motor_state || motorStatusChangeFlag) {
+                //Use timer to turn on
+                check_and_publish(TOPIC_MotorStatusChange, ON_WITH_TIMER, 0);
+                onTimerFlag = 1;
+                motor_state = 1;
+                timer_to_reset.detach();
+                timer_to_reset.once(timer_solar_seconds, resetVar);
+                motorStatusChangeFlag = 0;
+            }
         }
 
         else if (s1 && !s2 && s3) {
@@ -501,14 +510,14 @@ void loop() {
         }
 
         //Report changes to sensor values
-        if (sensorStatusFlag){   //
+        if (sensorStatusFlag){   //send sensor states frequently
             check_and_publish(TOPIC_MainTankMid, (s1 ? ON : OFF), 1);
             check_and_publish(TOPIC_MainTankOVF, (s2 ? ON : OFF), 1);
             check_and_publish(TOPIC_SolarTankMid, (s3 ? ON : OFF), 1);
             sensorStatusFlag = 0;
         }
-
-        else {
+        
+        else {    //when sensor state changes send immediately
             s1 ^ s1prev ? check_and_publish(TOPIC_MainTankMid, (s1 ? ON : OFF), 1) : 0;
             s2 ^ s2prev ? check_and_publish(TOPIC_MainTankOVF, (s2 ? ON : OFF), 1) : 0;
             s3 ^ s3prev ? check_and_publish(TOPIC_SolarTankMid, (s3 ? ON : OFF), 1) : 0;
